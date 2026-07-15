@@ -6,7 +6,7 @@
   <a href="https://github.com/epilot-dev/anonymization/blob/main/](https://github.com/epilot-dev/anonymization/blob/main/LICENSE)"><img src="http://img.shields.io/:license-mit-blue.svg" alt="License"></a>
 </p>
 
-<p align="center">Deterministic PII pseudonymization and redaction for [epilot](https://www.epilot.cloud) entity
+<p align="center">Deterministic PII pseudonymization and redaction for <a href="https://www.epilot.cloud">epilot</a>] entity
 data and arbitrary JSON.</p>
 
 Built for **data minimization**: AI agents, analytics pipelines, logs, and integrations usually
