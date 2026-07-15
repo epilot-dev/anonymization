@@ -1,7 +1,13 @@
-# @epilot/anonymization
+<h1 align="center"><img alt="epilot" src="https://raw.githubusercontent.com/epilot-dev/sdk-js/main/logo.png" width="200"><br>@epilot/anonymization</h1>
 
-Deterministic PII pseudonymization and redaction for [epilot](https://www.epilot.cloud) entity
-data and arbitrary JSON.
+<p align="center">
+  <a href="https://github.com/epilot-dev/anonymization/actions"><img src="https://github.com/epilot-dev/anonymization/workflows/CI/badge.svg" alt="CI"></a>
+  <a href="https://www.npmjs.com/package/@epilot/anonymization"><img src="https://img.shields.io/npm/v/@epilot/anonymization.svg" alt="npm version"></a>
+  <a href="https://github.com/epilot-dev/anonymization/blob/main/](https://github.com/epilot-dev/anonymization/blob/main/LICENSE)"><img src="http://img.shields.io/:license-mit-blue.svg" alt="License"></a>
+</p>
+
+<p align="center">Deterministic PII pseudonymization and redaction for [epilot](https://www.epilot.cloud) entity
+data and arbitrary JSON.</p>
 
 Built for **data minimization**: AI agents, analytics pipelines, logs, and integrations usually
 need the *shape* and *relationships* of business data — not the personal identifiers inside it.
