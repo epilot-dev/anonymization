@@ -1,0 +1,44 @@
+{
+  "name": "@epilot/anonymization",
+  "version": "0.1.0",
+  "description": "Deterministic PII pseudonymization and redaction for epilot entity data and arbitrary JSON — data minimization for AI agents, analytics, logs and integrations",
+  "license": "MIT",
+  "author": "epilot GmbH",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/epilot-dev/anonymization.git"
+  },
+  "keywords": [
+    "anonymization",
+    "pseudonymization",
+    "pii",
+    "gdpr",
+    "data-protection",
+    "data-minimization",
+    "ai-safety",
+    "epilot"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "rm -rf dist && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.5.0"
+  }
+}
