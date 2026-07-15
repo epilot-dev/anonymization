@@ -36,7 +36,13 @@ export type AnonymizationStrategy =
    * pseudonymize name/email, redact credentials (`token`, `password`, `secret`), keep ids and
    * operational metadata (status, language, notification settings)
    */
-  | 'user';
+  | 'user'
+  /**
+   * anonymize a consent value (`consent` attributes, e.g. `consent_email_marketing`):
+   * pseudonymize the contact identifier(s) (email/phone) the consent is keyed on, keep the
+   * consent status and event structure
+   */
+  | 'consent';
 
 /** Data classification set on a schema attribute (`data_classification` in the Entity API) */
 export type DataClassification = 'public' | 'pii';

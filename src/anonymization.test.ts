@@ -170,6 +170,50 @@ describe('user-relation attributes (type relation_user)', () => {
   });
 });
 
+describe('consent attributes (type consent)', () => {
+  const schema: Schema = {
+    slug: 'contact',
+    attributes: [{ name: 'consent_email_marketing', type: 'consent' }],
+  };
+  // shape observed leaking in production
+  const entity = {
+    _id: 'c1',
+    _org: '739224',
+    _schema: 'contact',
+    consent_email_marketing: {
+      status: 'unknown',
+      identifiers: [{ identifier: 'd.munoz+business@epilot.cloud', status: 'unknown', events: [] }],
+    },
+  };
+
+  it('pseudonymizes the consent identifier, keeps status and structure', () => {
+    const consent = (anonymizer.anonymizeEntity({ entity, schema }) as any).consent_email_marketing;
+    expect(consent.status).toBe('unknown');
+    expect(consent.identifiers[0].identifier).toMatch(/@anonymized\.invalid$/);
+    expect(consent.identifiers[0].identifier).not.toContain('munoz');
+    expect(consent.identifiers[0].status).toBe('unknown');
+    expect(consent.identifiers[0].events).toEqual([]);
+  });
+
+  it('is caught by the curated name fallback without a schema', () => {
+    const consent = (anonymizer.anonymizeEntity({ entity, schema: null }) as any).consent_email_marketing;
+    expect(consent.identifiers[0].identifier).toMatch(/@anonymized\.invalid$/);
+  });
+
+  it('handles phone identifiers and bare-string identifiers', () => {
+    const result = anonymizer.anonymizeEntity({
+      entity: {
+        _id: 'c2',
+        _org: '739224',
+        _schema: 'contact',
+        consent_phone_marketing: { status: 'given', identifiers: ['+49 170 1234567'] },
+      },
+      schema: null,
+    }) as any;
+    expect(result.consent_phone_marketing.identifiers[0]).toMatch(/^\+00 000 \d{8}$/);
+  });
+});
+
 describe('fail-safe without secret', () => {
   it('redacts instead of pseudonymizing', () => {
     const noSecret = createAnonymizer({ orgId: '123' });

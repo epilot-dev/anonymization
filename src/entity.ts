@@ -131,6 +131,8 @@ export const applyStrategy = (params: {
       return mapValue(value, (item) => anonymizePaymentItem(item, pseudonymizer));
     case 'user':
       return mapValue(value, (item) => anonymizeUserItem(item, pseudonymizer));
+    case 'consent':
+      return mapValue(value, (item) => anonymizeConsentItem(item, pseudonymizer));
     case 'date_year':
       return mapStringLeaves(value, (str) => pseudonymizer.dateToYear(str));
     case 'redact':
@@ -260,6 +262,59 @@ const anonymizeUserItem = (item: unknown, pseudonymizer: Pseudonymizer): unknown
     // recurse so a sensitive key nested deeper (e.g. token inside a settings object) is caught
     if (isPlainObject(val) || Array.isArray(val)) {
       return anonymizeUserItem(val, pseudonymizer);
+    }
+
+    return val;
+  });
+};
+
+/** keys inside a consent value that hold the contact identifier the consent is keyed on */
+const CONSENT_IDENTIFIER_KEYS = ['identifier', 'email', 'phone'];
+
+/** pseudonymize a contact identifier string, preserving whether it reads as email or phone */
+const pseudonymizeIdentifier = (value: string, pseudonymizer: Pseudonymizer): string => {
+  if (value.includes('@')) {
+    return pseudonymizer.email(value);
+  }
+  if (/^[+0-9][\d\s\-/()]*\d$/.test(value)) {
+    return pseudonymizer.phone(value);
+  }
+
+  return pseudonymizer.value(value);
+};
+
+/**
+ * Anonymize a consent value (consent attributes such as `consent_email_marketing`).
+ * Pseudonymizes the contact identifier(s) the consent is keyed on (email or phone), keeps the
+ * consent status and event structure, and scrubs identifiers embedded elsewhere in the value.
+ */
+const anonymizeConsentItem = (item: unknown, pseudonymizer: Pseudonymizer): unknown => {
+  // consent identifiers can be stored as bare strings (`identifiers: string[]`)
+  if (typeof item === 'string') {
+    return pseudonymizeIdentifier(item, pseudonymizer);
+  }
+
+  if (Array.isArray(item)) {
+    return item.map((i) => anonymizeConsentItem(i, pseudonymizer));
+  }
+
+  if (!isPlainObject(item)) {
+    return item;
+  }
+
+  return mapEntries(item, (val, key) => {
+    if (SYSTEM_KEEP_KEYS.includes(key)) {
+      return val;
+    }
+    if (CONSENT_IDENTIFIER_KEYS.includes(key.toLowerCase()) && typeof val === 'string') {
+      return pseudonymizeIdentifier(val, pseudonymizer);
+    }
+    if (isPlainObject(val) || Array.isArray(val)) {
+      return anonymizeConsentItem(val, pseudonymizer);
+    }
+    // scrub any identifier embedded in remaining free text (e.g. event payloads)
+    if (typeof val === 'string') {
+      return pseudonymizer.scrubText(val);
     }
 
     return val;

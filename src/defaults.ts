@@ -26,6 +26,8 @@ export const STRATEGY_BY_ATTRIBUTE_TYPE: Record<string, AnonymizationStrategy> =
   // user-relation attributes embed full epilot user objects (name, email, and often an auth
   // `token`) — never pass them through raw
   relation_user: 'user',
+  // consent attributes embed the contact identifier (email/phone) the consent is keyed on
+  consent: 'consent',
 };
 
 /**
@@ -70,6 +72,10 @@ export const DEFAULT_PII_FIELDS: Record<string, AnonymizationStrategy> = {
   '*:owner': 'user',
   '*:assigned_to': 'user',
   '*:agent': 'user',
+  // common consent attribute names — safety net when the schema is unavailable; type-based
+  // classification (`consent`) covers custom-named ones
+  '*:consent_email_marketing': 'consent',
+  '*:consent_phone_marketing': 'consent',
 };
 
 /**
