@@ -23,6 +23,9 @@ export const STRATEGY_BY_ATTRIBUTE_TYPE: Record<string, AnonymizationStrategy> =
   phone: 'phone',
   address: 'address',
   payment: 'payment',
+  // user-relation attributes embed full epilot user objects (name, email, and often an auth
+  // `token`) — never pass them through raw
+  relation_user: 'user',
 };
 
 /**
@@ -61,6 +64,38 @@ export const DEFAULT_PII_FIELDS: Record<string, AnonymizationStrategy> = {
   'message:text': 'redact',
   'message:html': 'redact',
   'thread:topic': 'redact',
+  // common user-relation attribute names — safety net for when the schema (and thus the
+  // `relation_user` type) is unavailable; type-based classification covers custom-named ones
+  '*:contact_owner': 'user',
+  '*:owner': 'user',
+  '*:assigned_to': 'user',
+  '*:agent': 'user',
+};
+
+/**
+ * Per-key rules applied inside an embedded user object (the `user` strategy).
+ * Keys not listed are kept (ids, status, language, notification settings, timestamps).
+ * Matching is case-insensitive and also applies at any nesting depth.
+ */
+export const USER_FIELD_STRATEGY: Record<string, AnonymizationStrategy> = {
+  email: 'email',
+  name: 'person',
+  display_name: 'person',
+  full_name: 'person',
+  first_name: 'person',
+  last_name: 'person',
+  given_name: 'person',
+  family_name: 'person',
+  phone: 'phone',
+  // credentials that must never appear in an anonymized response
+  token: 'redact',
+  access_token: 'redact',
+  refresh_token: 'redact',
+  api_key: 'redact',
+  apikey: 'redact',
+  secret: 'redact',
+  password: 'redact',
+  authorization: 'redact',
 };
 
 /**

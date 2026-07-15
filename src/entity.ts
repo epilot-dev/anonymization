@@ -4,6 +4,7 @@ import {
   PAYMENT_PSEUDONYMIZE_KEY_PATTERN,
   STRATEGY_BY_ATTRIBUTE_TYPE,
   SYSTEM_KEEP_KEYS,
+  USER_FIELD_STRATEGY,
 } from './defaults';
 import type { Pseudonymizer } from './pseudonymizer';
 import type { AnonymizationStrategy, Attribute, EntityLike, Schema } from './types';
@@ -128,6 +129,8 @@ export const applyStrategy = (params: {
       return mapValue(value, (item) => anonymizeAddressItem(item, pseudonymizer));
     case 'payment':
       return mapValue(value, (item) => anonymizePaymentItem(item, pseudonymizer));
+    case 'user':
+      return mapValue(value, (item) => anonymizeUserItem(item, pseudonymizer));
     case 'date_year':
       return mapStringLeaves(value, (str) => pseudonymizer.dateToYear(str));
     case 'redact':
@@ -219,6 +222,44 @@ const anonymizePaymentItem = (item: unknown, pseudonymizer: Pseudonymizer): unkn
     }
     if (typeof val === 'string' && PAYMENT_PSEUDONYMIZE_KEY_PATTERN.test(key)) {
       return key.toLowerCase().includes('iban') ? pseudonymizer.iban(val) : pseudonymizer.value(val);
+    }
+
+    return val;
+  });
+};
+
+/**
+ * Anonymize an embedded epilot user object (user-relation attributes such as `contact_owner`).
+ * Pseudonymizes name/email fields and REDACTS credentials (`token`, `password`, `secret`, …),
+ * while keeping non-identifying operational metadata (ids, status, language, notification
+ * settings, timestamps). Rules are applied by key at every nesting depth.
+ */
+const anonymizeUserItem = (item: unknown, pseudonymizer: Pseudonymizer): unknown => {
+  if (typeof item === 'string') {
+    return pseudonymizer.person(item);
+  }
+
+  if (Array.isArray(item)) {
+    return item.map((i) => anonymizeUserItem(i, pseudonymizer));
+  }
+
+  if (!isPlainObject(item)) {
+    return item;
+  }
+
+  return mapEntries(item, (val, key) => {
+    if (SYSTEM_KEEP_KEYS.includes(key)) {
+      return val;
+    }
+
+    const strategy = USER_FIELD_STRATEGY[key.toLowerCase()];
+    if (strategy) {
+      return applyStrategy({ value: val, strategy, pseudonymizer });
+    }
+
+    // recurse so a sensitive key nested deeper (e.g. token inside a settings object) is caught
+    if (isPlainObject(val) || Array.isArray(val)) {
+      return anonymizeUserItem(val, pseudonymizer);
     }
 
     return val;

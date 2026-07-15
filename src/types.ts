@@ -30,7 +30,13 @@ export type AnonymizationStrategy =
   /** generalize an address: keep postal_code/city/country, pseudonymize street, drop the rest */
   | 'address'
   /** scrub payment details: pseudonymize IBAN/holder identifiers, keep bank metadata */
-  | 'payment';
+  | 'payment'
+  /**
+   * anonymize an embedded epilot user object (user-relation attributes, e.g. `contact_owner`):
+   * pseudonymize name/email, redact credentials (`token`, `password`, `secret`), keep ids and
+   * operational metadata (status, language, notification settings)
+   */
+  | 'user';
 
 /** Data classification set on a schema attribute (`data_classification` in the Entity API) */
 export type DataClassification = 'public' | 'pii';

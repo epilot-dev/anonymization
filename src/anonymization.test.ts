@@ -123,6 +123,53 @@ describe('anonymizeEntity (schema-aware)', () => {
   });
 });
 
+describe('user-relation attributes (type relation_user)', () => {
+  const schema: Schema = {
+    slug: 'contact',
+    attributes: [{ name: 'contact_owner', type: 'relation_user' }],
+  };
+  // shape observed leaking in production: an embedded epilot user object with an auth token
+  const entity = {
+    _id: 'c1',
+    _org: '739224',
+    _schema: 'contact',
+    contact_owner: [
+      {
+        id: '10002602',
+        email: 'zsoltssolyom+user1@gmail.com',
+        display_name: 'Zsolt user',
+        token: '90359967-d521-424d-9140-d863dea2706a',
+        organization_id: '739224',
+        preferred_language: 'de',
+        status: 'Active',
+        email_notification_setting: { assigned_task: true, created_task: true },
+        created_at: '2020-11-06T16:31:37.705261',
+      },
+    ],
+  };
+
+  it('pseudonymizes name/email, REDACTS the token, keeps ids and metadata', () => {
+    const owner = (anonymizer.anonymizeEntity({ entity, schema }) as any).contact_owner[0];
+    expect(owner.email).toMatch(/@anonymized\.invalid$/);
+    expect(owner.email).not.toContain('zsolt');
+    expect(owner.display_name).toMatch(/^person_/);
+    expect(owner.token).toBe('[REDACTED]'); // credential must never pass through
+    // non-PII operational metadata preserved for assignment logic
+    expect(owner.id).toBe('10002602');
+    expect(owner.organization_id).toBe('739224');
+    expect(owner.status).toBe('Active');
+    expect(owner.preferred_language).toBe('de');
+    expect(owner.email_notification_setting).toEqual({ assigned_task: true, created_task: true });
+    expect(owner.created_at).toBe('2020-11-06T16:31:37.705261');
+  });
+
+  it('is caught by curated name fallback even without a schema', () => {
+    const owner = (anonymizer.anonymizeEntity({ entity, schema: null }) as any).contact_owner[0];
+    expect(owner.email).toMatch(/@anonymized\.invalid$/);
+    expect(owner.token).toBe('[REDACTED]');
+  });
+});
+
 describe('fail-safe without secret', () => {
   it('redacts instead of pseudonymizing', () => {
     const noSecret = createAnonymizer({ orgId: '123' });

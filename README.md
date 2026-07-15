@@ -171,6 +171,7 @@ counts as PII".
 | Addresses | keep postal code / city / country; pseudonymize street; drop the rest |
 | Birthdates, PII-flagged dates | truncate to year |
 | Payment items | pseudonymize IBAN/holder; keep bank name / BIC |
+| User-relation attributes (`relation_user`, e.g. `contact_owner`) | pseudonymize name/email, **redact credentials** (`token`, `password`, …), keep ids/status/settings |
 | Curated free-text (note/message content, opportunity description, …) | `[REDACTED]` |
 | `data_classification: 'pii'` fields | pseudonym (single-line) / `[REDACTED]` (multiline) |
 | Everything else | unchanged |
