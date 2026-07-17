@@ -214,13 +214,53 @@ describe('consent attributes (type consent)', () => {
   });
 });
 
+describe('catch-all scrub of unclassified fields', () => {
+  it('scrubs email/phone/IBAN embedded in custom-named fields and computed titles', () => {
+    const result = anonymizer.anonymizeEntity({
+      entity: {
+        _id: 'x',
+        _org: '123',
+        _schema: 'custom_thing',
+        _title: 'Lead for max@example.com',
+        // none of these keys are classified by type/curated rules
+        work_contact: 'reach me at max@example.com or +49 170 1234567',
+        billing_ref: 'IBAN DE89370400440532013000',
+        internal_code: 'ABC-123',
+      },
+      schema: null,
+    }) as any;
+
+    expect(result._title).not.toContain('max@example.com');
+    expect(result._title).toContain('Lead for'); // non-PII text preserved
+    expect(result.work_contact).not.toContain('max@example.com');
+    expect(result.work_contact).not.toContain('1234567');
+    expect(result.billing_ref).not.toContain('DE89370400440532013000');
+    expect(result.internal_code).toBe('ABC-123'); // no identifier -> untouched
+  });
+
+  it('keeps system metadata untouched', () => {
+    const result = anonymizer.anonymizeEntity({
+      entity: { _id: 'e1', _org: '123', _schema: 'custom', _tags: ['a@b.com'], note: 'x@y.com' },
+      schema: null,
+    }) as any;
+    expect(result._id).toBe('e1'); // system keys never scrubbed
+    expect(result._tags).toEqual(['a@b.com']);
+    expect(result.note).not.toContain('x@y.com');
+  });
+});
+
 describe('fail-safe without secret', () => {
-  it('redacts instead of pseudonymizing', () => {
+  it('redacts classified PII but keeps non-PII, and scrubs identifiers out of free text', () => {
     const noSecret = createAnonymizer({ orgId: '123' });
-    const result = noSecret.anonymizeEntity({ entity: contact, schema: contactSchema }) as any;
+    const result = noSecret.anonymizeEntity({
+      entity: { ...contact, work_note: 'call max@example.com' },
+      schema: contactSchema,
+    }) as any;
     expect(result.first_name).toBe('[REDACTED]');
     expect(result.email[0].email).toBe('[REDACTED]');
-    expect(result.status).toBe('active');
+    expect(result.status).toBe('active'); // kept non-PII must survive the catch-all
+    // catch-all replaces only the matched identifier, not the whole string
+    expect(result.work_note).toBe('call [REDACTED]');
   });
 });
 

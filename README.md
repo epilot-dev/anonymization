@@ -147,11 +147,14 @@ Being upfront about what this package does **not** do is part of its job:
    is still personal data, because the mapping is re-derivable with the secret. Treat outputs
    accordingly in your DPA assessments. (Static redaction via `strict` mode is stronger but
    destroys utility.)
-2. **Free text is opt-in by default.** Unclassified free-text fields pass through in
-   schema-aware mode (masking them all would destroy utility). Well-known risky fields
-   (note/message content, opportunity descriptions, …) are covered by the curated defaults, and
-   organizations opt further fields in with `data_classification: 'pii'`. Users can still type
-   PII into fields nobody classified.
+2. **Free text is kept by default, but identifiers in it are scrubbed.** Unclassified free-text
+   fields are not fully masked in schema-aware mode (masking them all would destroy utility),
+   but a catch-all pass scrubs any email / phone / IBAN embedded in kept string values (custom
+   fields, computed titles, attribute types not special-cased). Well-known risky fields
+   (note/message content, opportunity descriptions, …) are fully redacted via the curated
+   defaults; organizations opt further fields in with `data_classification: 'pii'` or out with
+   `'public'` (which also exempts them from the catch-all). Names or other non-pattern PII typed
+   into unclassified fields can still slip through.
 3. **Heuristics are best-effort.** The non-schema mode catches common field names and
    email/phone/IBAN patterns. Novel field names or unusual formats can slip through — use
    `strict: true` where that is unacceptable.

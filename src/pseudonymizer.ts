@@ -58,7 +58,9 @@ export const createPseudonymizer = (params: {
       street: redact,
       dateToYear: redact,
       redact,
-      scrubText: redact,
+      // still scrub identifiers OUT of free text (replacing only the matched substrings),
+      // rather than blanking the whole string — so the catch-all pass keeps non-PII text intact
+      scrubText: makeScrubText(redact, redact, redact),
     };
   }
 
@@ -89,14 +91,21 @@ export const createPseudonymizer = (params: {
       return Number.isFinite(year) ? `${year}-01-01` : REDACTED_PLACEHOLDER;
     },
     redact: () => REDACTED_PLACEHOLDER,
-    scrubText: (value: string) =>
-      value
-        // skip already-pseudonymized emails so scrubbing stays idempotent
-        // (phone pseudonyms are idempotent by format, IBAN pseudonyms don't match IBAN_PATTERN)
-        .replace(EMAIL_PATTERN, (match) => (match.endsWith(`@${PSEUDONYM_EMAIL_DOMAIN}`) ? match : email(match)))
-        .replace(IBAN_PATTERN, iban)
-        .replace(PHONE_PATTERN, phone),
+    scrubText: makeScrubText(email, iban, phone),
   };
 };
+
+/**
+ * Build a text scrubber that replaces email / IBAN / phone substrings embedded in free text,
+ * leaving the rest of the string intact. `email`/`iban`/`phone` are the pseudonymizer's own
+ * replacers (or the redactor when no secret is configured). Idempotent: pseudonymized emails
+ * are skipped, and phone/IBAN pseudonyms do not re-match the patterns.
+ */
+const makeScrubText =
+  (email: (v: string) => string, iban: (v: string) => string, phone: (v: string) => string) => (value: string) =>
+    value
+      .replace(EMAIL_PATTERN, (match) => (match.endsWith(`@${PSEUDONYM_EMAIL_DOMAIN}`) ? match : email(match)))
+      .replace(IBAN_PATTERN, iban)
+      .replace(PHONE_PATTERN, phone);
 
 const normalize = (value: string) => value.trim().toLowerCase();

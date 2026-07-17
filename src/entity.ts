@@ -85,28 +85,48 @@ export const anonymizeEntity = <T extends EntityLike>(params: {
   const result: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(entity)) {
-    // _title is computed from attributes and can carry PII (e.g. contact names)
-    if (key === '_title') {
-      const strategy = getAttributeStrategy({ slug, attributeName: '_title', overrides });
-      result[key] = applyStrategy({ value, strategy, pseudonymizer });
-      continue;
-    }
-
-    if (SYSTEM_KEEP_KEYS.includes(key)) {
+    if (key !== '_title' && SYSTEM_KEEP_KEYS.includes(key)) {
       result[key] = value;
       continue;
     }
 
-    const strategy = getAttributeStrategy({
-      slug,
-      attributeName: key,
-      attribute: attributesByName.get(key),
-      overrides,
-    });
-    result[key] = applyStrategy({ value, strategy, pseudonymizer });
+    const attribute = key === '_title' ? undefined : attributesByName.get(key);
+    // _title is computed from attributes and can carry PII (e.g. contact names)
+    const strategy = getAttributeStrategy({ slug, attributeName: key, attribute, overrides });
+
+    if (strategy !== 'keep') {
+      result[key] = applyStrategy({ value, strategy, pseudonymizer });
+      continue;
+    }
+
+    // Kept values fall into two cases:
+    // - explicitly kept (data_classification 'public', or an override to 'keep'): the org has
+    //   reviewed the field and opted out — pass through untouched.
+    // - kept by default (unclassified custom fields, computed titles, attribute types we have
+    //   not special-cased): apply the catch-all scrub so a stray email/phone/IBAN embedded in
+    //   the value cannot leak. Only matched identifier substrings are replaced.
+    result[key] = isExplicitlyKept({ slug, key, attribute, overrides })
+      ? value
+      : mapStringLeaves(value, (str) => pseudonymizer.scrubText(str));
   }
 
   return result as T;
+};
+
+/** true when the org deliberately opted a field out of anonymization (never re-scrub it) */
+const isExplicitlyKept = (params: {
+  slug: string;
+  key: string;
+  attribute?: Attribute;
+  overrides?: Record<string, AnonymizationStrategy>;
+}): boolean => {
+  const { slug, key, attribute, overrides } = params;
+
+  return (
+    attribute?.data_classification === 'public' ||
+    overrides?.[`${slug}:${key}`] === 'keep' ||
+    overrides?.[`*:${key}`] === 'keep'
+  );
 };
 
 /**
