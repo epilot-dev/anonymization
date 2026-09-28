@@ -186,6 +186,11 @@ counts as PII".
 | `data_classification: 'pii'` fields | pseudonym (single-line) / `[REDACTED]` (multiline) |
 | Everything else | unchanged |
 
+## MCP proxy (draft)
+
+[`mcp-proxy/`](./mcp-proxy) is an MCP gateway that runs upstream MCP tool results (first preset:
+Fullstory MCP) through this package before they reach an LLM. See its README.
+
 ## Development
 
 ```sh
