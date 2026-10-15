@@ -365,3 +365,61 @@ describe('non-schema-aware mode', () => {
     expect(result.note).toBe('[REDACTED]');
   });
 });
+
+describe('message entity from/to names', () => {
+  const message = {
+    _id: 'm1',
+    _schema: 'message',
+    from: { name: 'Max Mustermann', address: 'max@example.com' },
+    to: [
+      { name: 'Erika Musterfrau', address: 'erika@example.com' },
+      { name: 'Hans Beispiel', address: 'hans@example.com' },
+    ],
+  };
+
+  it('pseudonymizes from.name and every to[].name without a schema', () => {
+    const out = anonymizer.anonymizeEntity({ entity: message, schema: null }) as any;
+    expect(out.from.name).not.toBe('Max Mustermann');
+    expect(out.to[0].name).not.toBe('Erika Musterfrau');
+    expect(out.to[1].name).not.toBe('Hans Beispiel');
+    expect(JSON.stringify(out)).not.toMatch(/example\.com/);
+    expect(out._id).toBe('m1');
+  });
+
+  it('is deterministic', () => {
+    const a = anonymizer.anonymizeEntity({ entity: message, schema: null }) as any;
+    const b = anonymizer.anonymizeEntity({ entity: message, schema: null }) as any;
+    expect(a.from.name).toBe(b.from.name);
+  });
+
+  it('cannot be opted out via data_classification public or keep overrides', () => {
+    const schema: Schema = {
+      slug: 'message',
+      attributes: [
+        { name: 'from', type: 'string', data_classification: 'public' },
+        { name: 'to', type: 'string', data_classification: 'public' },
+      ],
+    };
+    const custom = createAnonymizer({ orgId: '123', secret: 'test-secret', overrides: { 'message:to': 'keep' } });
+    const out = custom.anonymizeEntity({ entity: message, schema }) as any;
+    expect(out.from.name).not.toBe('Max Mustermann');
+    expect(out.to[0].name).not.toBe('Erika Musterfrau');
+  });
+
+  it('handles single-object to, bare strings, empty and null values', () => {
+    const out = anonymizer.anonymizeEntity({
+      entity: { _schema: 'message', from: 'Max Mustermann', to: { name: 'Erika Musterfrau' } },
+      schema: null,
+    }) as any;
+    expect(out.from).not.toBe('Max Mustermann');
+    expect(out.to.name).not.toBe('Erika Musterfrau');
+    const edge = anonymizer.anonymizeEntity({ entity: { _schema: 'message', from: null, to: [] }, schema: null }) as any;
+    expect(edge.from).toBeNull();
+    expect(edge.to).toEqual([]);
+  });
+
+  it('does not affect from/to on other schemas', () => {
+    const out = anonymizer.anonymizeEntity({ entity: { _schema: 'ticket', from: { name: 'Berlin' } }, schema: null }) as any;
+    expect(out.from.name).toBe('Berlin');
+  });
+});

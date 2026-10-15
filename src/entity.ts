@@ -90,6 +90,13 @@ export const anonymizeEntity = <T extends EntityLike>(params: {
       continue;
     }
 
+    // message sender/recipient names are always pseudonymized, regardless of schema
+    // classification or overrides (not even `data_classification: 'public'` opts them out)
+    if (slug === 'message' && MESSAGE_PARTY_KEYS.includes(key)) {
+      result[key] = anonymizeMessageParty(value, pseudonymizer);
+      continue;
+    }
+
     const attribute = key === '_title' ? undefined : attributesByName.get(key);
     // _title is computed from attributes and can carry PII (e.g. contact names)
     const strategy = getAttributeStrategy({ slug, attributeName: key, attribute, overrides });
@@ -111,6 +118,39 @@ export const anonymizeEntity = <T extends EntityLike>(params: {
   }
 
   return result as T;
+};
+
+/** message entity attributes holding sender (`from`) / recipient (`to`) parties */
+const MESSAGE_PARTY_KEYS = ['from', 'to'];
+
+/**
+ * Anonymize a message party (`{ name, address }`, a single object or an array of them).
+ * `name` is always pseudonymized; any other string (e.g. the email `address`) is scrubbed of
+ * embedded identifiers. A bare string is pseudonymized as an identifier or a person name.
+ */
+const anonymizeMessageParty = (value: unknown, pseudonymizer: Pseudonymizer): unknown => {
+  if (typeof value === 'string') {
+    return value.includes('@') ? pseudonymizer.scrubText(value) : value ? pseudonymizer.person(value) : value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => anonymizeMessageParty(item, pseudonymizer));
+  }
+
+  if (!isPlainObject(value)) {
+    return value;
+  }
+
+  return mapEntries(value, (val, key) => {
+    if (SYSTEM_KEEP_KEYS.includes(key)) {
+      return val;
+    }
+    if (key.toLowerCase() === 'name') {
+      return mapStringLeaves(val, (str) => pseudonymizer.person(str));
+    }
+
+    return mapStringLeaves(val, (str) => pseudonymizer.scrubText(str));
+  });
 };
 
 /** true when the org deliberately opted a field out of anonymization (never re-scrub it) */
