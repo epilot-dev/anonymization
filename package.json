@@ -1,6 +1,6 @@
 {
   "name": "@epilot/anonymization",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Deterministic PII pseudonymization and redaction for epilot entity data and arbitrary JSON — data minimization for AI agents, analytics, logs and integrations",
   "license": "MIT",
   "author": "epilot GmbH",
