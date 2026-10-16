@@ -1,6 +1,7 @@
 import {
   ADDRESS_KEEP_KEYS,
   DEFAULT_PII_FIELDS,
+  PAYMENT_PERSON_KEY_PATTERN,
   PAYMENT_PSEUDONYMIZE_KEY_PATTERN,
   STRATEGY_BY_ATTRIBUTE_TYPE,
   SYSTEM_KEEP_KEYS,
@@ -72,8 +73,10 @@ export const anonymizeEntity = <T extends EntityLike>(params: {
   slug?: string;
   pseudonymizer: Pseudonymizer;
   overrides?: Record<string, AnonymizationStrategy>;
+  /** resolves the schema of an entity nested in a `submission` (`entities[]`); null = curated defaults only */
+  nestedSchema?: (slug: string) => Schema | null | undefined;
 }): T => {
-  const { entity, schema, pseudonymizer, overrides } = params;
+  const { entity, schema, pseudonymizer, overrides, nestedSchema } = params;
   const slug = params.slug ?? (entity?._schema as string) ?? schema?.slug ?? '*';
 
   if (!isPlainObject(entity)) {
@@ -94,6 +97,24 @@ export const anonymizeEntity = <T extends EntityLike>(params: {
     // classification or overrides (not even `data_classification: 'public'` opts them out)
     if (slug === 'message' && MESSAGE_PARTY_KEYS.includes(key)) {
       result[key] = anonymizeMessageParty(value, pseudonymizer);
+      continue;
+    }
+
+    // a submission carries the entities captured by the journey (contact, opportunity, …);
+    // they have a `_schema` but no `_id`/`_org`, so the generic entity walker never sees them
+    if (slug === 'submission' && key === 'entities' && Array.isArray(value)) {
+      result[key] = value.map((item) =>
+        isPlainObject(item) && typeof item._schema === 'string'
+          ? anonymizeEntity({
+              entity: item,
+              schema: nestedSchema?.(item._schema),
+              slug: item._schema,
+              pseudonymizer,
+              overrides,
+              nestedSchema,
+            })
+          : mapStringLeaves(item, (str) => pseudonymizer.scrubText(str)),
+      );
       continue;
     }
 
@@ -281,6 +302,9 @@ const anonymizePaymentItem = (item: unknown, pseudonymizer: Pseudonymizer): unkn
     }
     if (isPlainObject(val) || Array.isArray(val)) {
       return anonymizePaymentItem(val, pseudonymizer);
+    }
+    if (typeof val === 'string' && PAYMENT_PERSON_KEY_PATTERN.test(key)) {
+      return pseudonymizer.person(val);
     }
     if (typeof val === 'string' && PAYMENT_PSEUDONYMIZE_KEY_PATTERN.test(key)) {
       return key.toLowerCase().includes('iban') ? pseudonymizer.iban(val) : pseudonymizer.value(val);

@@ -46,6 +46,13 @@ export const DEFAULT_PII_FIELDS: Record<string, AnonymizationStrategy> = {
   '*:salutation': 'redact',
   '*:birthdate': 'date_year',
   '*:date_of_birth': 'date_year',
+  // structured PII by field name — safety net when the schema is unavailable (e.g. entities nested
+  // in a submission); type-based classification (`address`, `payment`) covers custom-named ones
+  '*:address': 'address',
+  '*:payment': 'payment',
+  // journey-submitted contact fields on the submission entity itself
+  'submission:contact_first_name': 'person',
+  'submission:contact_last_name': 'person',
   // common identifier field names on any schema (also covers plain string-typed variants)
   '*:email': 'email',
   '*:phone': 'phone',
@@ -134,6 +141,9 @@ export const ADDRESS_KEEP_KEYS = ['_id', '_tags', 'postal_code', 'zip', 'city', 
 
 /** Keys on payment items whose values identify a person/account and must be pseudonymized */
 export const PAYMENT_PSEUDONYMIZE_KEY_PATTERN = /iban|account|holder|owner|card|number/i;
+
+/** Keys on payment items holding a person's name (`fullname`, `first_name`, …); `bank_name` is kept */
+export const PAYMENT_PERSON_KEY_PATTERN = /(^|_)(full|first|last)_?name$/i;
 
 /** Keys never anonymized on any object (system metadata, not PII) */
 export const SYSTEM_KEEP_KEYS = [

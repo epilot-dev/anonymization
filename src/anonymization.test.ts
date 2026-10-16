@@ -423,3 +423,73 @@ describe('message entity from/to names', () => {
     expect(out.from.name).toBe('Berlin');
   });
 });
+
+describe('submission entities[] (nested entities without _id)', () => {
+  const submission = {
+    _id: 's1',
+    _org: '123',
+    _schema: 'submission',
+    _title: 's1',
+    source_type: 'journey',
+    entities: [
+      {
+        _schema: 'contact',
+        first_name: 'Erika',
+        last_name: 'Mustermann',
+        salutation: 'Frau',
+        birthdate: '1985-04-12',
+        email: [{ email: 'erika@example.com' }],
+        phone: [{ phone: '+49 221 1234567' }],
+        address: [{ city: 'Köln', country: 'DE', postal_code: '50668', street: 'Domstraße', street_number: '12' }],
+        payment: [
+          {
+            type: 'payment_sepa',
+            data: { bank_name: 'Commerzbank', fullname: 'Erika Mustermann', iban: 'DE89370400440532013000' },
+          },
+        ],
+      },
+      { _schema: 'opportunity', description: 'Bitte Rückruf vormittags', title: 'PV 10 kWp' },
+    ],
+  };
+
+  const expectMasked = (result: typeof submission) => {
+    const [contactOut, opportunityOut] = result.entities as Array<Record<string, any>>;
+    const json = JSON.stringify(result);
+    for (const leaked of ['Erika', 'Mustermann', 'Domstraße', '1985-04', 'Frau', '1234567', 'DE89370400440532013000']) {
+      expect(json).not.toContain(leaked);
+    }
+    expect(contactOut.first_name).toMatch(/^person_[0-9a-f]{8}$/);
+    expect(contactOut.birthdate).toBe('1985-01-01');
+    expect(contactOut.address[0]).toMatchObject({ city: 'Köln', postal_code: '50668' });
+    expect(contactOut.payment[0].data).toMatchObject({ bank_name: 'Commerzbank' });
+    expect(opportunityOut.description).toBe('[REDACTED]');
+    expect(opportunityOut.title).toBe('PV 10 kWp');
+  };
+
+  it('anonymizes nested entities with curated defaults (no schemas)', async () => {
+    expectMasked(await anonymizer.anonymizeResponse(submission));
+  });
+
+  it('anonymizes nested entities with their resolved schemas', async () => {
+    const schemas: Record<string, Schema> = { contact: contactSchema, submission: { slug: 'submission' } };
+    expectMasked(await anonymizer.anonymizeResponse(submission, { schemaResolver: ({ slug }) => schemas[slug] ?? null }));
+  });
+
+  it('anonymizeEntity handles a submission directly', () => {
+    expectMasked(anonymizer.anonymizeEntity({ entity: submission }));
+  });
+
+  it('pseudonymizes a nested contact exactly like a standalone contact (joinable, no double hash)', async () => {
+    const standalone = anonymizer.anonymizeEntity({
+      entity: { _id: 'c1', _org: '123', _schema: 'contact', ...submission.entities[0] },
+      schema: contactSchema,
+    });
+    const result = (await anonymizer.anonymizeResponse(submission, {
+      schemaResolver: ({ slug }) => (slug === 'contact' ? contactSchema : null),
+    })) as typeof submission;
+    const nested = result.entities[0] as Record<string, any>;
+    expect(nested.first_name).toBe((standalone as any).first_name);
+    expect(nested.email).toEqual((standalone as any).email);
+    expect(nested.payment[0].data.iban).toBe((standalone as any).payment[0].data.iban);
+  });
+});
