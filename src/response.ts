@@ -115,10 +115,14 @@ const transformNode = (node: unknown, context: TransformContext): unknown => {
       slug,
       pseudonymizer: context.pseudonymizer,
       overrides: context.overrides,
+      nestedSchema: (nestedSlug) => getSchemaFor(context, nestedSlug, node._org as string | undefined),
     });
 
-    // recurse to catch hydrated relations and other nested entities
-    return mapEntries(anonymized, (value) => transformNode(value, context));
+    // recurse to catch hydrated relations and other nested entities; a submission's
+    // entities[] are already anonymized (re-walking them would pseudonymize twice)
+    return mapEntries(anonymized, (value, key) =>
+      slug === 'submission' && key === 'entities' ? value : transformNode(value, context),
+    );
   }
 
   if (isEntityOperationLike(node)) {
@@ -147,6 +151,7 @@ const transformEntityOperation = (record: Record<string, unknown>, context: Tran
         slug: payloadSlug,
         pseudonymizer: context.pseudonymizer,
         overrides: context.overrides,
+        nestedSchema: (nestedSlug) => getSchemaFor(context, nestedSlug),
       });
     }
     if (key === 'diff' && isPlainObject(value)) {
@@ -160,6 +165,7 @@ const transformEntityOperation = (record: Record<string, unknown>, context: Tran
               slug: slug ?? '*',
               pseudonymizer: context.pseudonymizer,
               overrides: context.overrides,
+              nestedSchema: (nestedSlug) => getSchemaFor(context, nestedSlug),
             })
           : diffPart,
       );
