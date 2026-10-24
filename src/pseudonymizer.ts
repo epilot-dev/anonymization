@@ -33,7 +33,14 @@ export type Pseudonymizer = {
 
 const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const IBAN_PATTERN = /\b[A-Z]{2}\d{2}[ ]?(?:[A-Z0-9][ ]?){11,30}\b/g;
-const PHONE_PATTERN = /(?:\+|00)[1-9][\d\s\-/()]{6,}\d/g;
+// International: "+49 170 1234567", "0049 170 1234567". The "00" form only at a token start,
+// so digit runs inside ids, timestamps or amounts ("1729700123456") are left alone.
+const PHONE_PATTERN = /(?:\+|(?<![\w.])00)[1-9][\d\s\-/()]{6,}\d/g;
+// National (German/Austrian) format: trunk prefix 0 + area code, then a separator:
+// "030 1234567", "0221/123456", "0170-1234567", "(0221) 123 456". The separator keeps bare
+// digit runs (ids, postal codes) out; "0[1-9]" keeps the "+00 000 …" pseudonyms from re-matching.
+const NATIONAL_PHONE_PATTERN =
+  /(?<![\w.:/-])(?:0[1-9]\d{1,4}[\s/-]|\(0[1-9]\d{1,4}\)\s?)\d{3,}(?:[\s-]\d+)*(?![\w:/-]|\.\d)/g;
 
 export const createPseudonymizer = (params: {
   orgId: string;
@@ -106,6 +113,7 @@ const makeScrubText =
     value
       .replace(EMAIL_PATTERN, (match) => (match.endsWith(`@${PSEUDONYM_EMAIL_DOMAIN}`) ? match : email(match)))
       .replace(IBAN_PATTERN, iban)
-      .replace(PHONE_PATTERN, phone);
+      .replace(PHONE_PATTERN, phone)
+      .replace(NATIONAL_PHONE_PATTERN, phone);
 
 const normalize = (value: string) => value.trim().toLowerCase();

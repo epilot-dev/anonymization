@@ -156,7 +156,10 @@ Being upfront about what this package does **not** do is part of its job:
    `'public'` (which also exempts them from the catch-all). Names or other non-pattern PII typed
    into unclassified fields can still slip through.
 3. **Heuristics are best-effort.** The non-schema mode catches common field names and
-   email/phone/IBAN patterns. Novel field names or unusual formats can slip through — use
+   email/phone/IBAN patterns. Phones match in international (`+49 …`, `0049 …`) and German/Austrian
+   national format with a separator after the area code (`030 1234567`, `0221/123456`,
+   `(0221) 123 456`); a national number written as one digit run (`0301234567`) is left alone so
+   ids and postal codes are not mangled. Novel field names or unusual formats can slip through — use
    `strict: true` where that is unacceptable.
 4. **Quasi-identifier re-identification.** Kept generalized values (postal code + city +
    birth year + consumption data) can, in small populations, narrow down individuals. If you

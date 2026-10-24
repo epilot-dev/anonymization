@@ -338,6 +338,31 @@ describe('non-schema-aware mode', () => {
     expect(anonymizer.scrub(once)).toEqual(once);
   });
 
+  it('scrub replaces national phone numbers, idempotently', () => {
+    const phones = ['030 1234567', '0221/123456', '0170-1234567', '(0221) 123 456', '089 123 456 78'];
+    for (const phone of phones) {
+      const once = anonymizer.scrub({ text: `Hotline: ${phone}.` }) as any;
+      expect(once.text).toMatch(/^Hotline: \+00 000 \d{8}\.$/);
+      expect(anonymizer.scrub(once)).toEqual(once);
+    }
+  });
+
+  it('scrub leaves ids, dates, times, versions and amounts alone', () => {
+    const value = {
+      id: '01M5NNM83TV1',
+      ts: '17297001234567890',
+      order: 'A-2007891234567',
+      date: '2026-10-24',
+      time: '05:30 Uhr',
+      version: 'v0.123 4567',
+      postal: '01067 Dresden',
+      amount: '0,50 EUR',
+      url: 'https://example.com/030-1234567',
+      iso: '2026-10-24T05:30:00.000Z',
+    };
+    expect(anonymizer.scrub(value)).toEqual(value);
+  });
+
   it('anonymizeUnknown applies field-name heuristics', () => {
     const event = {
       event_type: 'contact.created',
