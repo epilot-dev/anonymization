@@ -26,6 +26,8 @@ export const STRATEGY_BY_ATTRIBUTE_TYPE: Record<string, AnonymizationStrategy> =
   // user-relation attributes embed full epilot user objects (name, email, and often an auth
   // `token`) — never pass them through raw
   relation_user: 'user',
+  // `internal_user` attributes (e.g. template `created_by`) embed the same user objects
+  internal_user: 'user',
   // address relations (e.g. opportunity `delivery_address`) carry the referenced address
   // values alongside the `$relation_ref`
   relation_address: 'address',
@@ -79,6 +81,13 @@ export const DEFAULT_PII_FIELDS: Record<string, AnonymizationStrategy> = {
   // computed titles of messages/threads are the subject/topic
   'message:_title': 'redact',
   'thread:_title': 'redact',
+  // computed titles built from personal data (title templates in the entity blueprints)
+  'billing_account:_title': 'text', // "{{billing_contact.0._title}} - …" = the contact's name
+  'calendar_event:_title': 'text', // the event subject
+  'contract:_title': 'text', // contract_name
+  'lead:_title': 'text', // lead_title
+  'request:_title': 'text', // request_title
+  'ticket:_title': 'text', // ticket_title
   // uploaded file names regularly contain customer names (e.g. "Rechnung_Mustermann.pdf");
   // `_title` is the file name too, so both map to the same pseudonym
   'file:filename': 'value',

@@ -82,9 +82,11 @@ const anonymizer = createAnonymizer({
 ### Schema-aware entity mode
 
 For epilot entities, when the entity schema is available (or resolvable). Classification uses,
-in order: the attribute's `data_classification` (`'public'` opt-out / `'pii'` opt-in), your
-`overrides`, the curated defaults, then attribute-type defaults (`email`, `phone`, `address`,
-`payment`).
+in order: `data_classification: 'public'` (opt-out), your `overrides`, the curated defaults,
+attribute-type defaults (`email`, `phone`, `address`, `payment`, user relations, …), then
+`data_classification: 'pii'` (opt-in). A `pii` attribute is never kept, and it still gets the
+specific strategy a curated default or its type gives it (a `pii` `first_name` stays a `person`
+pseudonym).
 
 ```ts
 // single entity (or a partial entity, e.g. an activity diff)
@@ -153,12 +155,18 @@ Being upfront about what this package does **not** do is part of its job:
    destroys utility.)
 2. **Free text is kept by default, but identifiers in it are scrubbed.** Unclassified free-text
    fields are not fully masked in schema-aware mode (masking them all would destroy utility),
-   but a catch-all pass scrubs any email / phone / IBAN embedded in kept string values (custom
-   fields, computed titles, attribute types not special-cased). Well-known risky fields
+   but a catch-all pass scrubs identifiers embedded in kept string values (custom fields,
+   computed titles, attribute types not special-cased): emails, phones, IBANs (mod-97 checked),
+   German street addresses ("Hauptstraße 5", "Schiltacher Str. 33" — postal code and city stay),
+   and PII inside URLs (components are decoded first; map links lose the place name, place ids
+   and the precise position, coordinates are rounded to 2 decimals ≈ 1 km). Only the matched
+   span is replaced. Well-known risky fields
    (note/message content, opportunity descriptions, …) are fully redacted via the curated
    defaults; organizations opt further fields in with `data_classification: 'pii'` or out with
    `'public'` (which also exempts them from the catch-all). Names or other non-pattern PII typed
-   into unclassified fields can still slip through.
+   into unclassified fields can still slip through. The street detector is pattern based: a
+   capitalized word ending in a street suffix followed by a 1-3 digit number also matches
+   non-addresses ("Arbeitsplatz 2"), and streets without a suffix ("An der Kirche 3") are missed.
 3. **Heuristics are best-effort.** The non-schema mode catches common field names and
    email/phone/IBAN patterns. Phones match in international (`+49 …`, `0049 …`) and German/Austrian
    national format with a separator after the area code (`030 1234567`, `0221/123456`,
@@ -187,7 +195,7 @@ counts as PII".
 | Addresses (`address`, `relation_address`) | keep postal code / city / country; pseudonymize street; drop the rest |
 | Birthdates, PII-flagged dates | truncate to year |
 | Payment items | pseudonymize IBAN/holder; keep bank name / BIC |
-| User-relation attributes (`relation_user`, e.g. `contact_owner`) | pseudonymize name/email, **redact credentials** (`token`, `password`, …), keep ids/status/settings |
+| User-relation attributes (`relation_user`, `internal_user`, e.g. `contact_owner`) | pseudonymize name/email, **redact credentials** (`token`, `password`, …), keep ids/status/settings |
 | Consent attributes (`consent`, e.g. `consent_email_marketing`) | pseudonymize the contact identifier (email/phone), keep consent status and events |
 | Message parties (`from`, `to`, `cc`, `bcc`, `reply_to`) | pseudonymize names, scrub addresses |
 | Activity `caller` (incl. nested `EpilotAuth` claims) | same rules as user-relation attributes |
@@ -195,7 +203,9 @@ counts as PII".
 | File names (`file` `filename` / `_title`) | `value` pseudonym |
 | Entity fields not in the schema (e.g. `journey_data`) | field-name heuristics of `anonymizeUnknown` |
 | `data_classification: 'pii'` fields | pseudonym (single-line) / `[REDACTED]` (multiline) |
-| Everything else | emails / phones / IBANs embedded in strings are scrubbed, the rest is unchanged |
+| Computed titles built from personal data (`billing_account`, `calendar_event`, `contract`, `lead`, `request`, `ticket` `_title`) | `text` pseudonym |
+| Map links (Google, Apple, Bing, OpenStreetMap, short links) in unclassified fields | place → `street` pseudonym + postal code / city, place ids pseudonymized, coordinates rounded to ~1 km |
+| Everything else | emails / phones / IBANs / street addresses embedded in strings (and URL components) are scrubbed, the rest is unchanged |
 
 ## Development
 
