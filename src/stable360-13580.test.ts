@@ -161,4 +161,26 @@ describe('STABLE360-13580', () => {
     expect(result.results[0]._title).toBe(result.results[0].filename);
     expect(result.results[0].mime_type).toBe('application/pdf');
   });
+
+  it('leaves fields the org marked public untouched (catch-all does not re-scrub entity data)', async () => {
+    const schema: Schema = {
+      slug: 'contact',
+      attributes: [
+        { name: 'tariff_email', type: 'email', data_classification: 'public' },
+        { name: 'service_info', type: 'json', data_classification: 'public' },
+      ],
+    };
+    const entity = {
+      _id: 'c1',
+      _org: '123',
+      _schema: 'contact',
+      tariff_email: 'tariffs@energy.example',
+      service_info: { hotline: 'service@energy.example' },
+    };
+
+    const result = await anonymizer.anonymizeResponse({ results: [entity] }, { schemaResolver: async () => schema });
+
+    expect(result.results[0].tariff_email).toBe('tariffs@energy.example');
+    expect(result.results[0].service_info.hotline).toBe('service@energy.example');
+  });
 });

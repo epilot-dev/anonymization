@@ -10,6 +10,12 @@ type TransformContext = {
   schemas: SchemaMap;
   pseudonymizer: Pseudonymizer;
   overrides?: Record<string, AnonymizationStrategy>;
+  /**
+   * false inside an anonymized entity: its fields were already classified by schema (incl. fields
+   * the org explicitly opted out via `data_classification: 'public'`), so the catch-all string
+   * scrub must not touch them. Nested entities are still anonymized by their own schema.
+   */
+  scrubStrings?: boolean;
 };
 
 /**
@@ -105,7 +111,7 @@ const transformNode = (node: unknown, context: TransformContext): unknown => {
   // catch-all: identifiers embedded in strings outside any recognized shape (activity payloads
   // written by other services, nested JSON, …) are scrubbed too. Idempotent on pseudonyms.
   if (typeof node === 'string') {
-    return node ? context.pseudonymizer.scrubText(node) : node;
+    return node && context.scrubStrings !== false ? context.pseudonymizer.scrubText(node) : node;
   }
 
   if (!isPlainObject(node)) {
@@ -127,16 +133,19 @@ const transformNode = (node: unknown, context: TransformContext): unknown => {
     // recurse to catch hydrated relations and other nested entities; a submission's
     // entities[] are already anonymized (re-walking them would pseudonymize twice)
     return mapEntries(anonymized, (value, key) =>
-      slug === 'submission' && key === 'entities' ? value : transformNode(value, context),
+      slug === 'submission' && key === 'entities' ? value : transformNode(value, { ...context, scrubStrings: false }),
     );
   }
 
+  // an operation/activity record is not entity data: the catch-all applies again inside it
+  const recordContext = { ...context, scrubStrings: true };
+
   if (isEntityOperationLike(node)) {
-    return transformEntityOperation(node, context);
+    return transformEntityOperation(node, recordContext);
   }
 
   if (isActivityLike(node)) {
-    return transformActivity(node, context);
+    return transformActivity(node, recordContext);
   }
 
   return mapEntries(node, (value) => transformNode(value, context));
