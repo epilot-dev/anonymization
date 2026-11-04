@@ -1,7 +1,7 @@
-import { anonymizeEntity, applyStrategy } from './entity';
+import { anonymizeEntity, applyStrategy, type PlanCache } from './entity';
 import type { Pseudonymizer } from './pseudonymizer';
 import type { AnonymizationStrategy, AnonymizerLogger, Schema, SchemaResolver } from './types';
-import { isPlainObject, mapEntries } from './utils';
+import { isPlainObject, mapArrayShared, mapEntries, mapEntriesShared } from './utils';
 
 type SchemaMap = Map<string, Schema | null>;
 
@@ -10,6 +10,7 @@ type TransformContext = {
   schemas: SchemaMap;
   pseudonymizer: Pseudonymizer;
   overrides?: Record<string, AnonymizationStrategy>;
+  planCache: PlanCache;
   /**
    * false inside an anonymized entity: its fields were already classified by schema (incl. fields
    * the org explicitly opted out via `data_classification: 'public'`), so the catch-all string
@@ -29,6 +30,9 @@ type TransformContext = {
  *
  * Schemas are resolved once per (org, slug) via the injected resolver before the synchronous
  * transform pass. A resolver failure is fail-safe: curated field-name defaults still apply.
+ *
+ * The input is never mutated. Unchanged subtrees are shared with the input rather than copied,
+ * so treat the result as read-only.
  */
 export const anonymizeResponse = async <T>(params: {
   body: T;
@@ -45,10 +49,14 @@ export const anonymizeResponse = async <T>(params: {
     await loadSchemas({ node: body, orgId, schemas, schemaResolver, logger });
   }
 
-  return transformNode(body, { orgId, schemas, pseudonymizer, overrides }) as T;
+  return transformNode(body, { orgId, schemas, pseudonymizer, overrides, planCache: new Map() }) as T;
 };
 
-/** Recursively collect and resolve all schemas referenced by entity-shaped nodes */
+/**
+ * Collect every (org, slug) referenced by entity-shaped nodes in one synchronous pass, then
+ * resolve the distinct schemas concurrently. (Awaiting per node would cost a microtask for every
+ * value of a multi-MB response.)
+ */
 const loadSchemas = async (params: {
   node: unknown;
   orgId: string;
@@ -58,46 +66,55 @@ const loadSchemas = async (params: {
 }): Promise<void> => {
   const { node, orgId, schemas, schemaResolver, logger } = params;
 
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      await loadSchemas({ ...params, node: item });
+  const wanted = new Map<string, { orgId: string; slug: string }>();
+  const add = (org: string, slug: string) => {
+    const key = `${org}:${slug}`;
+    if (!schemas.has(key) && !wanted.has(key)) {
+      wanted.set(key, { orgId: org, slug });
+    }
+  };
+
+  const stack: unknown[] = [node];
+  while (stack.length) {
+    const current = stack.pop();
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        if (item !== null && typeof item === 'object') stack.push(item);
+      }
+      continue;
+    }
+    if (!isPlainObject(current)) {
+      continue;
     }
 
-    return;
+    const entityOrg = typeof current._org === 'string' ? current._org : orgId;
+    if (typeof current._schema === 'string') {
+      add(entityOrg, current._schema);
+    }
+    // entity operations carry the schema slug in params.slug (diffs have no _schema)
+    const paramsSlug = (current.params as Record<string, unknown> | undefined)?.slug;
+    if (typeof current.operation === 'string' && typeof paramsSlug === 'string') {
+      add(entityOrg, paramsSlug);
+    }
+
+    for (const key in current) {
+      const value = current[key];
+      if (value !== null && typeof value === 'object') stack.push(value);
+    }
   }
 
-  if (!isPlainObject(node)) {
-    return;
-  }
-
-  const slugs: string[] = [];
-  if (typeof node._schema === 'string') {
-    slugs.push(node._schema);
-  }
-  // entity operations carry the schema slug in params.slug (diffs have no _schema)
-  const paramsSlug = (node.params as Record<string, unknown> | undefined)?.slug;
-  if (typeof node.operation === 'string' && typeof paramsSlug === 'string') {
-    slugs.push(paramsSlug);
-  }
-
-  const entityOrg = typeof node._org === 'string' ? node._org : orgId;
-  for (const slug of slugs) {
-    const key = `${entityOrg}:${slug}`;
-    if (!schemas.has(key)) {
+  await Promise.all(
+    [...wanted].map(async ([key, { orgId: org, slug }]) => {
       try {
-        schemas.set(key, (await schemaResolver({ orgId: entityOrg, slug })) ?? null);
+        schemas.set(key, (await schemaResolver({ orgId: org, slug })) ?? null);
       } catch (error) {
         // fail safe: without a schema, type-based classification is skipped but
         // curated defaults (by field name) still apply in anonymizeEntity
-        logger?.warn?.('@epilot/anonymization: schema resolution failed', { orgId: entityOrg, slug, error });
+        logger?.warn?.('@epilot/anonymization: schema resolution failed', { orgId: org, slug, error });
         schemas.set(key, null);
       }
-    }
-  }
-
-  for (const value of Object.values(node)) {
-    await loadSchemas({ ...params, node: value });
-  }
+    }),
+  );
 };
 
 const getSchemaFor = (context: TransformContext, slug: string, org?: string): Schema | null =>
@@ -105,7 +122,7 @@ const getSchemaFor = (context: TransformContext, slug: string, org?: string): Sc
 
 const transformNode = (node: unknown, context: TransformContext): unknown => {
   if (Array.isArray(node)) {
-    return node.map((item) => transformNode(item, context));
+    return mapArrayShared(node, (item) => transformNode(item, context));
   }
 
   // catch-all: identifiers embedded in strings outside any recognized shape (activity payloads
@@ -127,28 +144,29 @@ const transformNode = (node: unknown, context: TransformContext): unknown => {
       slug,
       pseudonymizer: context.pseudonymizer,
       overrides: context.overrides,
+        planCache: context.planCache,
       nestedSchema: (nestedSlug) => getSchemaFor(context, nestedSlug, node._org as string | undefined),
     });
 
     // recurse to catch hydrated relations and other nested entities; a submission's
     // entities[] are already anonymized (re-walking them would pseudonymize twice)
-    return mapEntries(anonymized, (value, key) =>
-      slug === 'submission' && key === 'entities' ? value : transformNode(value, { ...context, scrubStrings: false }),
+    const entityContext = context.scrubStrings === false ? context : { ...context, scrubStrings: false };
+
+    return mapEntriesShared(anonymized, (value, key) =>
+      slug === 'submission' && key === 'entities' ? value : transformNode(value, entityContext),
     );
   }
 
   // an operation/activity record is not entity data: the catch-all applies again inside it
-  const recordContext = { ...context, scrubStrings: true };
-
   if (isEntityOperationLike(node)) {
-    return transformEntityOperation(node, recordContext);
+    return transformEntityOperation(node, context.scrubStrings === false ? { ...context, scrubStrings: true } : context);
   }
 
   if (isActivityLike(node)) {
-    return transformActivity(node, recordContext);
+    return transformActivity(node, context.scrubStrings === false ? { ...context, scrubStrings: true } : context);
   }
 
-  return mapEntries(node, (value) => transformNode(value, context));
+  return mapEntriesShared(node, (value) => transformNode(value, context));
 };
 
 const transformEntityOperation = (record: Record<string, unknown>, context: TransformContext): unknown => {
@@ -166,6 +184,7 @@ const transformEntityOperation = (record: Record<string, unknown>, context: Tran
         slug: payloadSlug,
         pseudonymizer: context.pseudonymizer,
         overrides: context.overrides,
+        planCache: context.planCache,
         nestedSchema: (nestedSlug) => getSchemaFor(context, nestedSlug),
       });
     }
@@ -180,6 +199,7 @@ const transformEntityOperation = (record: Record<string, unknown>, context: Tran
               slug: slug ?? '*',
               pseudonymizer: context.pseudonymizer,
               overrides: context.overrides,
+        planCache: context.planCache,
               nestedSchema: (nestedSlug) => getSchemaFor(context, nestedSlug),
             })
           : diffPart,
@@ -220,10 +240,10 @@ export const scrubStringLeaves = (node: unknown, pseudonymizer: Pseudonymizer): 
     return pseudonymizer.scrubText(node);
   }
   if (Array.isArray(node)) {
-    return node.map((item) => scrubStringLeaves(item, pseudonymizer));
+    return mapArrayShared(node, (item) => scrubStringLeaves(item, pseudonymizer));
   }
   if (isPlainObject(node)) {
-    return mapEntries(node, (value) => scrubStringLeaves(value, pseudonymizer));
+    return mapEntriesShared(node, (value) => scrubStringLeaves(value, pseudonymizer));
   }
 
   return node;

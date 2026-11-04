@@ -174,3 +174,7 @@ export const SYSTEM_KEEP_KEYS = [
   '$relation',
   '$relation_ref',
 ];
+
+/** Set views of the key lists above, for hot-path lookups */
+export const SYSTEM_KEEP_KEY_SET: ReadonlySet<string> = new Set(SYSTEM_KEEP_KEYS);
+export const ADDRESS_KEEP_KEY_SET: ReadonlySet<string> = new Set(ADDRESS_KEEP_KEYS);
