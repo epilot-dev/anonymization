@@ -180,14 +180,18 @@ counts as PII".
 | Names (`first_name`, contact `_title`, …) | `person` pseudonym |
 | Company names, tax/registration ids | `company` / `value` pseudonym |
 | Emails, phones, IBANs (typed or by field name) | format-preserving pseudonyms |
-| Addresses | keep postal code / city / country; pseudonymize street; drop the rest |
+| Addresses (`address`, `relation_address`) | keep postal code / city / country; pseudonymize street; drop the rest |
 | Birthdates, PII-flagged dates | truncate to year |
 | Payment items | pseudonymize IBAN/holder; keep bank name / BIC |
 | User-relation attributes (`relation_user`, e.g. `contact_owner`) | pseudonymize name/email, **redact credentials** (`token`, `password`, …), keep ids/status/settings |
 | Consent attributes (`consent`, e.g. `consent_email_marketing`) | pseudonymize the contact identifier (email/phone), keep consent status and events |
-| Curated free-text (note/message content, opportunity description, …) | `[REDACTED]` |
+| Message parties (`from`, `to`, `cc`, `bcc`, `reply_to`) | pseudonymize names, scrub addresses |
+| Activity `caller` (incl. nested `EpilotAuth` claims) | same rules as user-relation attributes |
+| Curated free-text (note/message content and titles, thread topic/title, opportunity description, …) | `[REDACTED]` |
+| File names (`file` `filename` / `_title`) | `value` pseudonym |
+| Entity fields not in the schema (e.g. `journey_data`) | field-name heuristics of `anonymizeUnknown` |
 | `data_classification: 'pii'` fields | pseudonym (single-line) / `[REDACTED]` (multiline) |
-| Everything else | unchanged |
+| Everything else | emails / phones / IBANs embedded in strings are scrubbed, the rest is unchanged |
 
 ## Development
 

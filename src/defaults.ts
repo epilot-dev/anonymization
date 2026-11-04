@@ -26,6 +26,9 @@ export const STRATEGY_BY_ATTRIBUTE_TYPE: Record<string, AnonymizationStrategy> =
   // user-relation attributes embed full epilot user objects (name, email, and often an auth
   // `token`) — never pass them through raw
   relation_user: 'user',
+  // address relations (e.g. opportunity `delivery_address`) carry the referenced address
+  // values alongside the `$relation_ref`
+  relation_address: 'address',
   // consent attributes embed the contact identifier (email/phone) the consent is keyed on
   consent: 'consent',
 };
@@ -73,6 +76,13 @@ export const DEFAULT_PII_FIELDS: Record<string, AnonymizationStrategy> = {
   'message:text': 'redact',
   'message:html': 'redact',
   'thread:topic': 'redact',
+  // computed titles of messages/threads are the subject/topic
+  'message:_title': 'redact',
+  'thread:_title': 'redact',
+  // uploaded file names regularly contain customer names (e.g. "Rechnung_Mustermann.pdf");
+  // `_title` is the file name too, so both map to the same pseudonym
+  'file:filename': 'value',
+  'file:_title': 'value',
   // common user-relation attribute names — safety net for when the schema (and thus the
   // `relation_user` type) is unavailable; type-based classification covers custom-named ones
   '*:contact_owner': 'user',
@@ -100,6 +110,10 @@ export const USER_FIELD_STRATEGY: Record<string, AnonymizationStrategy> = {
   given_name: 'person',
   family_name: 'person',
   phone: 'phone',
+  // identity claims of the caller's auth token (activity `caller.EpilotAuth`)
+  username: 'email',
+  'cognito:username': 'email',
+  preferred_username: 'email',
   // credentials that must never appear in an anonymized response
   token: 'redact',
   access_token: 'redact',
