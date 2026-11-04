@@ -2,6 +2,7 @@ import { createHmac } from 'crypto';
 
 import { PSEUDONYM_EMAIL_DOMAIN, REDACTED_PLACEHOLDER } from './defaults';
 import type { AnonymizerLogger } from './types';
+import { replaceIban, scrubStreets, scrubWithUrls, type ValueReplacers } from './value-detection';
 
 /**
  * Deterministic, one-way pseudonymization of PII values.
@@ -27,7 +28,10 @@ export type Pseudonymizer = {
   street: (value: string) => string;
   dateToYear: (value: string) => string;
   redact: (value?: unknown) => string;
-  /** replaces emails / phone numbers / IBANs embedded in free text; idempotent */
+  /**
+   * replaces emails / phone numbers / IBANs / street addresses embedded in free text, and the
+   * place + precise position of map links (URL components are decoded first); idempotent
+   */
   scrubText: (value: string) => string;
 };
 
@@ -67,7 +71,7 @@ export const createPseudonymizer = (params: {
       redact,
       // still scrub identifiers OUT of free text (replacing only the matched substrings),
       // rather than blanking the whole string — so the catch-all pass keeps non-PII text intact
-      scrubText: makeScrubText(redact, redact, redact),
+      scrubText: makeScrubText({ email: redact, iban: redact, phone: redact, street: redact, value: redact }),
     };
   }
 
@@ -82,6 +86,8 @@ export const createPseudonymizer = (params: {
   const phone = (value: string) =>
     `+00 000 ${parseInt(hash('phone', value), 16).toString().slice(0, 8).padStart(8, '0')}`;
   const iban = pseudonymize('iban', 'iban');
+  const street = pseudonymize('street', 'street');
+  const value = pseudonymize('value', 'value');
 
   return {
     person: pseudonymize('person', 'person'),
@@ -89,45 +95,60 @@ export const createPseudonymizer = (params: {
     email,
     phone,
     iban,
-    value: pseudonymize('value', 'value'),
+    value,
     text: pseudonymize('text', 'title'),
-    street: pseudonymize('street', 'street'),
+    street,
     dateToYear: (value: string) => {
       const year = new Date(value).getFullYear();
 
       return Number.isFinite(year) ? `${year}-01-01` : REDACTED_PLACEHOLDER;
     },
     redact: () => REDACTED_PLACEHOLDER,
-    scrubText: makeScrubText(email, iban, phone),
+    scrubText: makeScrubText({ email, iban, phone, street, value }),
   };
 };
 
+type ScrubReplacers = ValueReplacers & {
+  email: (value: string) => string;
+  iban: (value: string) => string;
+  phone: (value: string) => string;
+};
+
+/** Every detector needs an `@` (emails), a `/` (URLs) or a digit (IBANs, phones, house numbers) */
+const SCRUB_CANDIDATE = /[@/\d]/;
+
 /**
- * Build a text scrubber that replaces email / IBAN / phone substrings embedded in free text,
- * leaving the rest of the string intact. `email`/`iban`/`phone` are the pseudonymizer's own
- * replacers (or the redactor when no secret is configured). Idempotent: pseudonymized emails
- * are skipped, and phone/IBAN pseudonyms do not re-match the patterns.
+ * Build a text scrubber that replaces email / IBAN / phone / street-address substrings embedded
+ * in free text, leaving the rest of the string intact. Embedded URLs are decoded and scrubbed
+ * per component; map links lose the place and precise position (see value-detection.ts).
+ * The replacers are the pseudonymizer's own (or the redactor when no secret is configured).
+ * Idempotent: pseudonymized emails are skipped, and the other pseudonyms do not re-match.
  */
-const makeScrubText =
-  (email: (v: string) => string, iban: (v: string) => string, phone: (v: string) => string) => (value: string) => {
+const makeScrubText = (replacers: ScrubReplacers) => {
+  const { email, iban, phone } = replacers;
+
+  const scrubPlain = (value: string, context?: 'path'): string => {
     // Cheap prefilters, so the bulk of strings in a large response (enums, labels, numbers,
     // timestamps) skip the full patterns: emails need an `@`, and every IBAN / phone match
     // contains a NUMBER_CANDIDATE match (see below).
     const hasAt = value.includes('@');
     const hasNumber = NUMBER_CANDIDATE.test(value);
-    if (!hasAt && !hasNumber) {
-      return value;
-    }
 
     let result = hasAt
       ? value.replace(EMAIL_PATTERN, (match) => (match.endsWith(`@${PSEUDONYM_EMAIL_DOMAIN}`) ? match : email(match)))
       : value;
     if (hasNumber) {
-      result = result.replace(IBAN_PATTERN, iban).replace(PHONE_PATTERN, phone).replace(NATIONAL_PHONE_PATTERN, phone);
+      result = result.replace(IBAN_PATTERN, (match) => replaceIban(match, iban));
+      if (context !== 'path') {
+        result = result.replace(PHONE_PATTERN, phone).replace(NATIONAL_PHONE_PATTERN, phone);
+      }
     }
 
-    return result;
+    return scrubStreets(result, replacers);
   };
+
+  return (value: string): string => (SCRUB_CANDIDATE.test(value) ? scrubWithUrls(value, scrubPlain, replacers) : value);
+};
 
 /**
  * Necessary condition for IBAN_PATTERN / PHONE_PATTERN / NATIONAL_PHONE_PATTERN: the prefix

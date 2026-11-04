@@ -107,3 +107,37 @@ describe('anonymizeResponse on large responses', () => {
     expect(second.results[0].first_name).toBe(first.results[0].first_name);
   });
 });
+
+describe('value-level detection cost', () => {
+  const anonymizer = createAnonymizer({ orgId: '123', secret: 'test-secret' });
+
+  it('scrubs a large mixed response quickly (URLs, streets, ids, numbers, labels)', async () => {
+    const strings = [
+      'https://www.google.de/maps/place/Hauptstra%C3%9Fe+5,+10115+Berlin/@52.5200066,13.404954,17z',
+      'https://docs.example.com/v1/entities/73557d72-ff64-46ef-886d-93d221e45ea4?size=100',
+      'Termin Hauptstraße 5, 10115 Berlin',
+      'A-WP_PV-129-2504252_2505234_V2',
+      '2026-10-24T05:30:00.000Z',
+      'Einzelversorgungsgebiet',
+      '1-0:1.8.0',
+      '73557d72-ff64-46ef-886d-93d221e45ea4',
+    ];
+    const body = {
+      results: Array.from({ length: 2_000 }, (_, i) => ({
+        _id: `o${i}`,
+        _org: '123',
+        _schema: 'opportunity',
+        ...Object.fromEntries(strings.map((value, j) => [`custom_${j}`, value])),
+      })),
+    };
+
+    const started = performance.now();
+    const result = (await anonymizer.anonymizeResponse(body, { schemaResolver: async () => null })) as any;
+    const elapsed = performance.now() - started;
+
+    expect(result.results[0].custom_0).not.toContain('Hauptstra');
+    expect(result.results[0].custom_1).toBe(strings[1]);
+    // 16k strings; generous bound so slow CI runners do not flake, catches pathological regexes
+    expect(elapsed).toBeLessThan(2_000);
+  });
+});

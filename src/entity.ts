@@ -17,11 +17,14 @@ import { isPlainObject, mapArrayShared, mapEntries, mapEntriesShared } from './u
  *
  * Precedence (first match wins):
  * 1. `data_classification: 'public'` on the schema attribute -> keep (org opt-out)
- * 2. `data_classification: 'pii'` on the schema attribute -> mask (org opt-in, e.g. free text)
- * 3. consumer `overrides` (same key format as the curated map)
- * 4. curated built-in PII fields (`DEFAULT_PII_FIELDS`)
- * 5. defaults by attribute type (email, phone, address, payment)
+ * 2. consumer `overrides` (same key format as the curated map)
+ * 3. curated built-in PII fields (`DEFAULT_PII_FIELDS`)
+ * 4. defaults by attribute type (email, phone, address, payment, user relations, …)
+ * 5. `data_classification: 'pii'` on the schema attribute -> mask (org opt-in, e.g. free text):
+ *    dates keep the year, multiline text is redacted, single-line values are pseudonymized
  * 6. keep
+ *
+ * A `pii` attribute is never kept: an override or curated default to `keep` does not apply to it.
  */
 export const getAttributeStrategy = (params: {
   slug: string;
@@ -35,11 +38,22 @@ export const getAttributeStrategy = (params: {
     return 'keep';
   }
 
-  if (attribute?.data_classification === 'pii') {
-    const byType = attribute.type ? STRATEGY_BY_ATTRIBUTE_TYPE[attribute.type] : undefined;
-    if (byType) {
-      return byType;
-    }
+  const isPii = attribute?.data_classification === 'pii';
+  const configured =
+    overrides?.[`${slug}:${attributeName}`] ??
+    overrides?.[`*:${attributeName}`] ??
+    DEFAULT_PII_FIELDS[`${slug}:${attributeName}`] ??
+    DEFAULT_PII_FIELDS[`*:${attributeName}`];
+  if (configured && !(isPii && configured === 'keep')) {
+    return configured;
+  }
+
+  const byType = attribute?.type ? STRATEGY_BY_ATTRIBUTE_TYPE[attribute.type] : undefined;
+  if (byType) {
+    return byType;
+  }
+
+  if (isPii) {
     if (attribute.type === 'date' || attribute.type === 'datetime') {
       return 'date_year';
     }
@@ -48,18 +62,7 @@ export const getAttributeStrategy = (params: {
     return attribute.multiline ? 'redact' : 'value';
   }
 
-  const configured =
-    overrides?.[`${slug}:${attributeName}`] ??
-    overrides?.[`*:${attributeName}`] ??
-    DEFAULT_PII_FIELDS[`${slug}:${attributeName}`] ??
-    DEFAULT_PII_FIELDS[`*:${attributeName}`];
-  if (configured) {
-    return configured;
-  }
-
-  const byType = attribute?.type ? STRATEGY_BY_ATTRIBUTE_TYPE[attribute.type] : undefined;
-
-  return byType ?? 'keep';
+  return 'keep';
 };
 
 type KeyPlan = { attribute?: Attribute; strategy: AnonymizationStrategy; explicitlyKept: boolean };
