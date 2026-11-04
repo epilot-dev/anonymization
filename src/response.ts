@@ -1,4 +1,4 @@
-import { anonymizeEntity } from './entity';
+import { anonymizeEntity, applyStrategy } from './entity';
 import type { Pseudonymizer } from './pseudonymizer';
 import type { AnonymizationStrategy, AnonymizerLogger, Schema, SchemaResolver } from './types';
 import { isPlainObject, mapEntries } from './utils';
@@ -102,6 +102,12 @@ const transformNode = (node: unknown, context: TransformContext): unknown => {
     return node.map((item) => transformNode(item, context));
   }
 
+  // catch-all: identifiers embedded in strings outside any recognized shape (activity payloads
+  // written by other services, nested JSON, …) are scrubbed too. Idempotent on pseudonyms.
+  if (typeof node === 'string') {
+    return node ? context.pseudonymizer.scrubText(node) : node;
+  }
+
   if (!isPlainObject(node)) {
     return node;
   }
@@ -183,19 +189,12 @@ const transformActivity = (record: Record<string, unknown>, context: TransformCo
       return pseudonymizer.scrubText(value);
     }
     if (key === 'caller' && isPlainObject(value)) {
-      return mapEntries(value, (callerValue, callerKey) => {
-        if (typeof callerValue !== 'string') {
-          return callerValue;
-        }
-        if (['name', 'display_name', 'full_name'].includes(callerKey)) {
-          return pseudonymizer.person(callerValue);
-        }
-        if (callerKey === 'email') {
-          return pseudonymizer.email(callerValue);
-        }
-
-        return pseudonymizer.scrubText(callerValue);
-      });
+      // the caller is the request's security context (e.g. `{ EpilotAuth: { email, claims, token } }`):
+      // apply the embedded-user rules at every depth, then scrub what is left
+      return scrubStringLeaves(
+        applyStrategy({ value, strategy: 'user', pseudonymizer }),
+        pseudonymizer,
+      );
     }
     if (key === 'payload') {
       // entity payloads are anonymized by the walker; scrub remaining free text
@@ -227,8 +226,10 @@ const isEntityLike = (record: Record<string, unknown>): boolean =>
 const isEntityOperationLike = (record: Record<string, unknown>): boolean =>
   typeof record.operation === 'string' && ('payload' in record || 'diff' in record) && 'activity_id' in record;
 
+// `caller` is optional: activities created through `POST /v1/activity` (e.g. by the message API)
+// are stored without one, and must still have their payload scrubbed
 const isActivityLike = (record: Record<string, unknown>): boolean =>
   typeof record.type === 'string' &&
   typeof record.title === 'string' &&
   typeof record.message === 'string' &&
-  'caller' in record;
+  ('caller' in record || 'payload' in record);

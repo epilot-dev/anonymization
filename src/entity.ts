@@ -9,6 +9,7 @@ import {
 } from './defaults';
 import type { Pseudonymizer } from './pseudonymizer';
 import type { AnonymizationStrategy, Attribute, EntityLike, Schema } from './types';
+import { anonymizeUnknown } from './unknown';
 import { isPlainObject, mapEntries } from './utils';
 
 /**
@@ -93,7 +94,7 @@ export const anonymizeEntity = <T extends EntityLike>(params: {
       continue;
     }
 
-    // message sender/recipient names are always pseudonymized, regardless of schema
+    // message sender/recipient names (incl. cc/bcc) are always pseudonymized, regardless of schema
     // classification or overrides (not even `data_classification: 'public'` opts them out)
     if (slug === 'message' && MESSAGE_PARTY_KEYS.includes(key)) {
       result[key] = anonymizeMessageParty(value, pseudonymizer);
@@ -133,16 +134,25 @@ export const anonymizeEntity = <T extends EntityLike>(params: {
     // - kept by default (unclassified custom fields, computed titles, attribute types we have
     //   not special-cased): apply the catch-all scrub so a stray email/phone/IBAN embedded in
     //   the value cannot leak. Only matched identifier substrings are replaced.
-    result[key] = isExplicitlyKept({ slug, key, attribute, overrides })
-      ? value
-      : mapStringLeaves(value, (str) => pseudonymizer.scrubText(str));
+    if (isExplicitlyKept({ slug, key, attribute, overrides })) {
+      result[key] = value;
+      continue;
+    }
+
+    // Fields the schema does not define (e.g. `journey_data` captured by a journey) are
+    // arbitrary JSON: apply the field-name heuristics of the non-schema mode as well. Only
+    // when the schema is known, so a missing schema cannot turn every `name` into a pseudonym.
+    result[key] =
+      schema && !attribute && !key.startsWith('_') && (isPlainObject(value) || Array.isArray(value))
+        ? anonymizeUnknown({ value, pseudonymizer, overrides })
+        : mapStringLeaves(value, (str) => pseudonymizer.scrubText(str));
   }
 
   return result as T;
 };
 
-/** message entity attributes holding sender (`from`) / recipient (`to`) parties */
-const MESSAGE_PARTY_KEYS = ['from', 'to'];
+/** message entity attributes holding sender / recipient parties */
+const MESSAGE_PARTY_KEYS = ['from', 'to', 'cc', 'bcc', 'reply_to'];
 
 /**
  * Anonymize a message party (`{ name, address }`, a single object or an array of them).
@@ -262,7 +272,8 @@ const anonymizeAddressItem = (item: unknown, pseudonymizer: Pseudonymizer): unkn
 
   return Object.fromEntries(
     Object.entries(item).flatMap(([key, val]) => {
-      if (ADDRESS_KEEP_KEYS.includes(key)) {
+      // relation metadata (`$relation_ref` of address relations) is not personal data
+      if (ADDRESS_KEEP_KEYS.includes(key) || SYSTEM_KEEP_KEYS.includes(key)) {
         return [[key, val]];
       }
       if (key === 'street' && typeof val === 'string') {
