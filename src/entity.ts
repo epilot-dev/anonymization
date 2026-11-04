@@ -1,16 +1,16 @@
 import {
-  ADDRESS_KEEP_KEYS,
+  ADDRESS_KEEP_KEY_SET,
   DEFAULT_PII_FIELDS,
   PAYMENT_PERSON_KEY_PATTERN,
   PAYMENT_PSEUDONYMIZE_KEY_PATTERN,
   STRATEGY_BY_ATTRIBUTE_TYPE,
-  SYSTEM_KEEP_KEYS,
+  SYSTEM_KEEP_KEY_SET,
   USER_FIELD_STRATEGY,
 } from './defaults';
 import type { Pseudonymizer } from './pseudonymizer';
 import type { AnonymizationStrategy, Attribute, EntityLike, Schema } from './types';
 import { anonymizeUnknown } from './unknown';
-import { isPlainObject, mapEntries } from './utils';
+import { isPlainObject, mapArrayShared, mapEntries, mapEntriesShared } from './utils';
 
 /**
  * Resolve the anonymization strategy for a single attribute.
@@ -62,6 +62,60 @@ export const getAttributeStrategy = (params: {
   return byType ?? 'keep';
 };
 
+type KeyPlan = { attribute?: Attribute; strategy: AnonymizationStrategy; explicitlyKept: boolean };
+type SchemaPlan = { attributes: Map<string, Attribute>; keys: Map<string, KeyPlan> };
+
+/** Per-response classification cache: schema (null = none) -> slug -> plan */
+export type PlanCache = Map<Schema | null, Map<string, SchemaPlan>>;
+
+/** bound per plan so entities with arbitrary keys cannot grow the cache without limit */
+const MAX_CACHED_KEYS = 10_000;
+
+const getSchemaPlan = (params: { planCache: PlanCache; schema: Schema | null; slug: string }): SchemaPlan => {
+  const { planCache, schema, slug } = params;
+  let bySlug = planCache.get(schema);
+  if (!bySlug) {
+    bySlug = new Map();
+    planCache.set(schema, bySlug);
+  }
+  let plan = bySlug.get(slug);
+  if (!plan) {
+    plan = {
+      attributes: new Map((schema?.attributes ?? []).map((attr) => [attr.name, attr])),
+      keys: new Map(),
+    };
+    bySlug.set(slug, plan);
+  }
+
+  return plan;
+};
+
+const getKeyPlan = (params: {
+  plan: SchemaPlan;
+  slug: string;
+  key: string;
+  overrides?: Record<string, AnonymizationStrategy>;
+}): KeyPlan => {
+  const { plan, slug, key, overrides } = params;
+  const cached = plan.keys.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  // _title is computed from attributes and can carry PII (e.g. contact names)
+  const attribute = key === '_title' ? undefined : plan.attributes.get(key);
+  const keyPlan: KeyPlan = {
+    attribute,
+    strategy: getAttributeStrategy({ slug, attributeName: key, attribute, overrides }),
+    explicitlyKept: isExplicitlyKept({ slug, key, attribute, overrides }),
+  };
+  if (plan.keys.size < MAX_CACHED_KEYS) {
+    plan.keys.set(key, keyPlan);
+  }
+
+  return keyPlan;
+};
+
 /**
  * Anonymize a single entity (or partial entity, e.g. an activity diff) using its schema.
  *
@@ -76,6 +130,11 @@ export const anonymizeEntity = <T extends EntityLike>(params: {
   overrides?: Record<string, AnonymizationStrategy>;
   /** resolves the schema of an entity nested in a `submission` (`entities[]`); null = curated defaults only */
   nestedSchema?: (slug: string) => Schema | null | undefined;
+  /**
+   * Classification cache shared across calls with the same `overrides` (e.g. one response).
+   * Lets large result sets classify each (schema, attribute) once instead of once per entity.
+   */
+  planCache?: PlanCache;
 }): T => {
   const { entity, schema, pseudonymizer, overrides, nestedSchema } = params;
   const slug = params.slug ?? (entity?._schema as string) ?? schema?.slug ?? '*';
@@ -84,19 +143,21 @@ export const anonymizeEntity = <T extends EntityLike>(params: {
     return entity;
   }
 
-  const attributesByName = new Map<string, Attribute>((schema?.attributes ?? []).map((attr) => [attr.name, attr]));
+  const planCache = params.planCache ?? new Map();
+  const plan = getSchemaPlan({ planCache, schema: schema ?? null, slug });
 
   const result: Record<string, unknown> = {};
 
-  for (const [key, value] of Object.entries(entity)) {
-    if (key !== '_title' && SYSTEM_KEEP_KEYS.includes(key)) {
+  for (const key of Object.keys(entity)) {
+    const value = entity[key];
+    if (key !== '_title' && SYSTEM_KEEP_KEY_SET.has(key)) {
       result[key] = value;
       continue;
     }
 
     // message sender/recipient names (incl. cc/bcc) are always pseudonymized, regardless of schema
     // classification or overrides (not even `data_classification: 'public'` opts them out)
-    if (slug === 'message' && MESSAGE_PARTY_KEYS.includes(key)) {
+    if (slug === 'message' && MESSAGE_PARTY_KEYS.has(key)) {
       result[key] = anonymizeMessageParty(value, pseudonymizer);
       continue;
     }
@@ -113,15 +174,14 @@ export const anonymizeEntity = <T extends EntityLike>(params: {
               pseudonymizer,
               overrides,
               nestedSchema,
+              planCache,
             })
           : mapStringLeaves(item, (str) => pseudonymizer.scrubText(str)),
       );
       continue;
     }
 
-    const attribute = key === '_title' ? undefined : attributesByName.get(key);
-    // _title is computed from attributes and can carry PII (e.g. contact names)
-    const strategy = getAttributeStrategy({ slug, attributeName: key, attribute, overrides });
+    const { attribute, strategy, explicitlyKept } = getKeyPlan({ plan, slug, key, overrides });
 
     if (strategy !== 'keep') {
       result[key] = applyStrategy({ value, strategy, pseudonymizer });
@@ -134,7 +194,7 @@ export const anonymizeEntity = <T extends EntityLike>(params: {
     // - kept by default (unclassified custom fields, computed titles, attribute types we have
     //   not special-cased): apply the catch-all scrub so a stray email/phone/IBAN embedded in
     //   the value cannot leak. Only matched identifier substrings are replaced.
-    if (isExplicitlyKept({ slug, key, attribute, overrides })) {
+    if (explicitlyKept) {
       result[key] = value;
       continue;
     }
@@ -152,7 +212,7 @@ export const anonymizeEntity = <T extends EntityLike>(params: {
 };
 
 /** message entity attributes holding sender / recipient parties */
-const MESSAGE_PARTY_KEYS = ['from', 'to', 'cc', 'bcc', 'reply_to'];
+const MESSAGE_PARTY_KEYS: ReadonlySet<string> = new Set(['from', 'to', 'cc', 'bcc', 'reply_to']);
 
 /**
  * Anonymize a message party (`{ name, address }`, a single object or an array of them).
@@ -173,7 +233,7 @@ const anonymizeMessageParty = (value: unknown, pseudonymizer: Pseudonymizer): un
   }
 
   return mapEntries(value, (val, key) => {
-    if (SYSTEM_KEEP_KEYS.includes(key)) {
+    if (SYSTEM_KEEP_KEY_SET.has(key)) {
       return val;
     }
     if (key.toLowerCase() === 'name') {
@@ -247,11 +307,11 @@ export const mapStringLeaves = (value: unknown, fn: (str: string) => string): un
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => mapStringLeaves(item, fn));
+    return mapArrayShared(value, (item) => mapStringLeaves(item, fn));
   }
 
   if (isPlainObject(value)) {
-    return mapEntries(value, (val, key) => (SYSTEM_KEEP_KEYS.includes(key) ? val : mapStringLeaves(val, fn)));
+    return mapEntriesShared(value, (val, key) => (SYSTEM_KEEP_KEY_SET.has(key) ? val : mapStringLeaves(val, fn)));
   }
 
   return value;
@@ -273,7 +333,7 @@ const anonymizeAddressItem = (item: unknown, pseudonymizer: Pseudonymizer): unkn
   return Object.fromEntries(
     Object.entries(item).flatMap(([key, val]) => {
       // relation metadata (`$relation_ref` of address relations) is not personal data
-      if (ADDRESS_KEEP_KEYS.includes(key) || SYSTEM_KEEP_KEYS.includes(key)) {
+      if (ADDRESS_KEEP_KEY_SET.has(key) || SYSTEM_KEEP_KEY_SET.has(key)) {
         return [[key, val]];
       }
       if (key === 'street' && typeof val === 'string') {
@@ -308,7 +368,7 @@ const anonymizePaymentItem = (item: unknown, pseudonymizer: Pseudonymizer): unkn
   }
 
   return mapEntries(item, (val, key) => {
-    if (SYSTEM_KEEP_KEYS.includes(key)) {
+    if (SYSTEM_KEEP_KEY_SET.has(key)) {
       return val;
     }
     if (isPlainObject(val) || Array.isArray(val)) {
@@ -345,7 +405,7 @@ const anonymizeUserItem = (item: unknown, pseudonymizer: Pseudonymizer): unknown
   }
 
   return mapEntries(item, (val, key) => {
-    if (SYSTEM_KEEP_KEYS.includes(key)) {
+    if (SYSTEM_KEEP_KEY_SET.has(key)) {
       return val;
     }
 
@@ -398,7 +458,7 @@ const anonymizeConsentItem = (item: unknown, pseudonymizer: Pseudonymizer): unkn
   }
 
   return mapEntries(item, (val, key) => {
-    if (SYSTEM_KEEP_KEYS.includes(key)) {
+    if (SYSTEM_KEEP_KEY_SET.has(key)) {
       return val;
     }
     if (CONSENT_IDENTIFIER_KEYS.includes(key.toLowerCase()) && typeof val === 'string') {

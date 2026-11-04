@@ -1,4 +1,4 @@
-import { DEFAULT_PII_FIELDS, SYSTEM_KEEP_KEYS, UNKNOWN_FIELD_HEURISTICS } from './defaults';
+import { DEFAULT_PII_FIELDS, SYSTEM_KEEP_KEY_SET, UNKNOWN_FIELD_HEURISTICS } from './defaults';
 import { applyStrategy } from './entity';
 import type { Pseudonymizer } from './pseudonymizer';
 import { scrubStringLeaves } from './response';
@@ -29,12 +29,21 @@ export const anonymizeUnknown = (params: {
 }): unknown => {
   const { value, pseudonymizer, strict = false, overrides } = params;
 
-  const fieldStrategy = (key: string): AnonymizationStrategy | undefined => {
-    const normalized = key.toLowerCase();
+  // per-call memo: arrays of records repeat the same keys thousands of times
+  const keyRules = new Map<string, { keep: boolean; strategy?: AnonymizationStrategy }>();
+  const keyRule = (key: string) => {
+    let rule = keyRules.get(key);
+    if (!rule) {
+      const normalized = key.toLowerCase();
+      rule = {
+        keep: SYSTEM_KEEP_KEY_SET.has(key) || isIdentifierKey(key),
+        strategy:
+          overrides?.[`*:${normalized}`] ?? DEFAULT_PII_FIELDS[`*:${normalized}`] ?? UNKNOWN_FIELD_HEURISTICS[normalized],
+      };
+      if (keyRules.size < 10_000) keyRules.set(key, rule);
+    }
 
-    return (
-      overrides?.[`*:${normalized}`] ?? DEFAULT_PII_FIELDS[`*:${normalized}`] ?? UNKNOWN_FIELD_HEURISTICS[normalized]
-    );
+    return rule;
   };
 
   const walk = (node: unknown): unknown => {
@@ -48,11 +57,11 @@ export const anonymizeUnknown = (params: {
 
     if (isPlainObject(node)) {
       return mapEntries(node, (val, key) => {
-        if (SYSTEM_KEEP_KEYS.includes(key) || isIdentifierKey(key)) {
+        const { keep, strategy } = keyRule(key);
+        if (keep) {
           return val;
         }
 
-        const strategy = fieldStrategy(key);
         if (strategy) {
           return applyStrategy({ value: val, strategy, pseudonymizer });
         }

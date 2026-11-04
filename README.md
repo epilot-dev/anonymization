@@ -48,6 +48,10 @@ This package encodes how epilot treats personal data, in public, reviewable code
 - **Fail safe, never open.** No secret configured → static redaction, never raw pass-through.
   Schema lookup failed → field-name defaults still apply. Inputs are never mutated; the package
   never logs values, phones home, or persists anything.
+- **Built for large responses.** One synchronous pass collects the schemas to resolve (fetched
+  concurrently, once each), classification is cached per (schema, attribute) per call, strings
+  that cannot contain an identifier skip the patterns, and unchanged subtrees are returned
+  as-is instead of copied — so results may share objects with the input: treat them as read-only.
 - **Honesty about limits.** This is *pseudonymization*, not anonymization in the strict GDPR
   Art. 4(5) sense — see [Limitations](#limitations-read-this) below. We would rather you know.
 

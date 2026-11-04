@@ -31,15 +31,15 @@ export type Pseudonymizer = {
   scrubText: (value: string) => string;
 };
 
-const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-const IBAN_PATTERN = /\b[A-Z]{2}\d{2}[ ]?(?:[A-Z0-9][ ]?){11,30}\b/g;
+export const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+export const IBAN_PATTERN = /\b[A-Z]{2}\d{2}[ ]?(?:[A-Z0-9][ ]?){11,30}\b/g;
 // International: "+49 170 1234567", "0049 170 1234567". The "00" form only at a token start,
 // so digit runs inside ids, timestamps or amounts ("1729700123456") are left alone.
-const PHONE_PATTERN = /(?:\+|(?<![\w.])00)[1-9][\d\s\-/()]{6,}\d/g;
+export const PHONE_PATTERN = /(?:\+|(?<![\w.])00)[1-9][\d\s\-/()]{6,}\d/g;
 // National (German/Austrian) format: trunk prefix 0 + area code, then a separator:
 // "030 1234567", "0221/123456", "0170-1234567", "(0221) 123 456". The separator keeps bare
 // digit runs (ids, postal codes) out; "0[1-9]" keeps the "+00 000 …" pseudonyms from re-matching.
-const NATIONAL_PHONE_PATTERN =
+export const NATIONAL_PHONE_PATTERN =
   /(?<![\w.:/-])(?:0[1-9]\d{1,4}[\s/-]|\(0[1-9]\d{1,4}\)\s?)\d{3,}(?:[\s-]\d+)*(?![\w:/-]|\.\d)/g;
 
 export const createPseudonymizer = (params: {
@@ -109,11 +109,31 @@ export const createPseudonymizer = (params: {
  * are skipped, and phone/IBAN pseudonyms do not re-match the patterns.
  */
 const makeScrubText =
-  (email: (v: string) => string, iban: (v: string) => string, phone: (v: string) => string) => (value: string) =>
-    value
-      .replace(EMAIL_PATTERN, (match) => (match.endsWith(`@${PSEUDONYM_EMAIL_DOMAIN}`) ? match : email(match)))
-      .replace(IBAN_PATTERN, iban)
-      .replace(PHONE_PATTERN, phone)
-      .replace(NATIONAL_PHONE_PATTERN, phone);
+  (email: (v: string) => string, iban: (v: string) => string, phone: (v: string) => string) => (value: string) => {
+    // Cheap prefilters, so the bulk of strings in a large response (enums, labels, numbers,
+    // timestamps) skip the full patterns: emails need an `@`, and every IBAN / phone match
+    // contains a NUMBER_CANDIDATE match (see below).
+    const hasAt = value.includes('@');
+    const hasNumber = NUMBER_CANDIDATE.test(value);
+    if (!hasAt && !hasNumber) {
+      return value;
+    }
+
+    let result = hasAt
+      ? value.replace(EMAIL_PATTERN, (match) => (match.endsWith(`@${PSEUDONYM_EMAIL_DOMAIN}`) ? match : email(match)))
+      : value;
+    if (hasNumber) {
+      result = result.replace(IBAN_PATTERN, iban).replace(PHONE_PATTERN, phone).replace(NATIONAL_PHONE_PATTERN, phone);
+    }
+
+    return result;
+  };
+
+/**
+ * Necessary condition for IBAN_PATTERN / PHONE_PATTERN / NATIONAL_PHONE_PATTERN: the prefix
+ * each of them must start with (same lookbehinds). A superset by construction — it may let
+ * through strings without a match, never skip one. Timestamps and plain numbers do not match.
+ */
+export const NUMBER_CANDIDATE = /[A-Z]{2}\d\d|\+[1-9]|(?<![\w.])00[1-9]|(?<![\w.:/-])\(?0[1-9]/;
 
 const normalize = (value: string) => value.trim().toLowerCase();
