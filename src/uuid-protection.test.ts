@@ -25,6 +25,11 @@ describe('UUIDs in scrubbed text', () => {
     expect(out).toMatch(/^Ticket 409cd08e-512e-4077-825e-001030608345: call \+00 000 \d{8}, IBAN iban_[0-9a-f]{8}$/);
   });
 
+  it('are pseudonymized with the email they are part of', () => {
+    const out = scrub('reply to 409cd08e-512e-4077-825e-001030608345@stadtwerke-x.de');
+    expect(out).toMatch(/^reply to [0-9a-f]{8}@anonymized\.invalid$/);
+  });
+
   it('stay intact in URLs while the URL is still scrubbed', () => {
     const out = scrub('https://app.example.com/flows/409cd08e-512e-4077-825e-001030608345?mail=max%40stadtwerke-x.de');
     expect(out).toContain('/flows/409cd08e-512e-4077-825e-001030608345');

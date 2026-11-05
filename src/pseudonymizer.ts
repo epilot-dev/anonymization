@@ -121,11 +121,13 @@ const KEPT_FIRST = 0xe100;
 const KEPT_LAST = 0xefff;
 const KEPT_MARK = /[\ue100-\uefff]/g;
 const HAS_KEPT_MARK = /[\ue100-\uefff]/;
+// Cheap hint without lookbehind; the exact boundaries are checked by UUID_TOKEN.
+const UUID_HINT = /[0-9a-f]{8}-[0-9a-f]{4}-/i;
 
 /** Runs `scan` with every UUID swapped for a marker, then puts the UUIDs back. */
 const withUuidsKept = (value: string, scan: (masked: string) => string): string => {
   // Text that already holds marker code points is scanned as-is, so restoring never mixes them up.
-  if (!value.includes('-') || HAS_KEPT_MARK.test(value)) {
+  if (!UUID_HINT.test(value) || HAS_KEPT_MARK.test(value)) {
     return scan(value);
   }
   const kept: string[] = [];
@@ -151,10 +153,7 @@ const SCRUB_CANDIDATE = /[@/\d]/;
 const makeScrubText = (replacers: ScrubReplacers) => {
   const { email, iban, phone } = replacers;
 
-  const scrubPlain = (value: string, context?: 'path'): string =>
-    withUuidsKept(value, (masked) => scrubDetectors(masked, context));
-
-  const scrubDetectors = (value: string, context?: 'path'): string => {
+  const scrubPlain = (value: string, context?: 'path'): string => {
     // Cheap prefilters, so the bulk of strings in a large response (enums, labels, numbers,
     // timestamps) skip the full patterns: emails need an `@`, and every IBAN / phone match
     // contains a NUMBER_CANDIDATE match (see below).
@@ -165,10 +164,12 @@ const makeScrubText = (replacers: ScrubReplacers) => {
       ? value.replace(EMAIL_PATTERN, (match) => (match.endsWith(`@${PSEUDONYM_EMAIL_DOMAIN}`) ? match : email(match)))
       : value;
     if (hasNumber) {
-      result = result.replace(IBAN_PATTERN, (match) => replaceIban(match, iban));
-      if (context !== 'path') {
-        result = result.replace(PHONE_PATTERN, phone).replace(NATIONAL_PHONE_PATTERN, phone);
-      }
+      // IBAN and phone patterns are the ones that can match digit runs inside a UUID.
+      result = withUuidsKept(result, (masked) => {
+        const ibans = masked.replace(IBAN_PATTERN, (match) => replaceIban(match, iban));
+
+        return context === 'path' ? ibans : ibans.replace(PHONE_PATTERN, phone).replace(NATIONAL_PHONE_PATTERN, phone);
+      });
     }
 
     return scrubStreets(result, replacers);
