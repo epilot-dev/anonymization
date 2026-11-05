@@ -160,8 +160,9 @@ Being upfront about what this package does **not** do is part of its job:
    German street addresses ("Hauptstraße 5", "Schiltacher Str. 33" — postal code and city stay),
    and PII inside URLs (components are decoded first; map links lose the place name, place ids
    and the precise position, coordinates are rounded to 2 decimals ≈ 1 km). Only the matched
-   span is replaced. Complete UUIDs are never scanned (a UUID cannot hold PII), so ids such as
-   `409cd08e-512e-4077-825e-001030608345` keep their digit runs. Well-known risky fields
+   span is replaced. Digits inside a complete UUID are never taken for a phone number or IBAN (a
+   UUID cannot hold PII), so ids such as `409cd08e-512e-4077-825e-001030608345` stay intact.
+   Well-known risky fields
    (note/message content, opportunity descriptions, …) are fully redacted via the curated
    defaults; organizations opt further fields in with `data_classification: 'pii'` or out with
    `'public'` (which also exempts them from the catch-all). Names or other non-pattern PII typed
