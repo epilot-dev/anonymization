@@ -142,6 +142,43 @@ describe('IBAN checksum', () => {
     expect(isValidIban('DE89370400440532013001')).toBe(false);
   });
 
+  // Puts valid check digits on a country code and BBAN, so only country and length decide.
+  const withCheckDigits = (country: string, bban: string) => {
+    const digits = `${bban}${country}00`.replace(/[A-Z]/g, (c) => String(c.charCodeAt(0) - 55));
+    let remainder = 0;
+    for (const digit of digits) {
+      remainder = (remainder * 10 + Number(digit)) % 97;
+    }
+
+    return `${country}${String(98 - remainder).padStart(2, '0')}${bban}`;
+  };
+
+  it('accepts IBANs of registry countries at their length, and of countries outside the registry', () => {
+    for (const iban of [
+      'CH9300762011623852957',
+      'GB29NWBK60161331926819',
+      'FR1420041010050500013M02606',
+      'NO9386011117947',
+      'LC55HEMM000100010012001200023015',
+      withCheckDigits('SN', 'A12345678901234567890123'),
+    ]) {
+      expect(isValidIban(iban)).toBe(true);
+    }
+  });
+
+  it('rejects an unknown country code or a wrong length, even with a valid checksum', () => {
+    expect(isValidIban(withCheckDigits('XX', '370400440532013000'))).toBe(false);
+    expect(isValidIban(withCheckDigits('DE', '37040044053201300'))).toBe(false);
+    expect(isValidIban(withCheckDigits('DE', '3704004405320130000'))).toBe(false);
+  });
+
+  it('does not mask hex ids that look like IBANs', () => {
+    // 32 hex characters starting with two letters and two digits; no IBAN country has length 32.
+    const hexId = withCheckDigits('CF', '68BD89442894AD4BBA4D00225817');
+    expect(isValidIban(hexId)).toBe(false);
+    expect(anonymizer.scrub(`EXIT-LOOP-${hexId}`)).toBe(`EXIT-LOOP-${hexId}`);
+  });
+
   it('masks a valid IBAN followed by uppercase text, but not IBAN-shaped codes', () => {
     const result = anonymizer.scrub('DE89 3704 0044 0532 0130 00 BIC COBADEFFXXX') as string;
 
