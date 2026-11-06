@@ -114,6 +114,32 @@ type ScrubReplacers = ValueReplacers & {
   phone: (value: string) => string;
 };
 
+/** A complete UUID: a fixed-format random token that cannot hold PII, so detectors never scan inside it. */
+const UUID_TOKEN = /(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])/gi;
+// One private-use code point per UUID: no detector matches it, it holds no digit, `@` or `/`.
+const KEPT_FIRST = 0xe100;
+const KEPT_LAST = 0xefff;
+const KEPT_MARK = /[\ue100-\uefff]/g;
+const HAS_KEPT_MARK = /[\ue100-\uefff]/;
+// Cheap hint without lookbehind; the exact boundaries are checked by UUID_TOKEN.
+const UUID_HINT = /[0-9a-f]{8}-[0-9a-f]{4}-/i;
+
+/** Runs `scan` with every UUID swapped for a marker, then puts the UUIDs back. */
+const withUuidsKept = (value: string, scan: (masked: string) => string): string => {
+  // Text that already holds marker code points is scanned as-is, so restoring never mixes them up.
+  if (!UUID_HINT.test(value) || HAS_KEPT_MARK.test(value)) {
+    return scan(value);
+  }
+  const kept: string[] = [];
+  const masked = value.replace(UUID_TOKEN, (uuid) =>
+    KEPT_FIRST + kept.length > KEPT_LAST ? uuid : String.fromCharCode(KEPT_FIRST + kept.push(uuid) - 1),
+  );
+  if (kept.length === 0) {
+    return scan(value);
+  }
+  return scan(masked).replace(KEPT_MARK, (mark) => kept[mark.charCodeAt(0) - KEPT_FIRST]);
+};
+
 /** Every detector needs an `@` (emails), a `/` (URLs) or a digit (IBANs, phones, house numbers) */
 const SCRUB_CANDIDATE = /[@/\d]/;
 
@@ -138,10 +164,12 @@ const makeScrubText = (replacers: ScrubReplacers) => {
       ? value.replace(EMAIL_PATTERN, (match) => (match.endsWith(`@${PSEUDONYM_EMAIL_DOMAIN}`) ? match : email(match)))
       : value;
     if (hasNumber) {
-      result = result.replace(IBAN_PATTERN, (match) => replaceIban(match, iban));
-      if (context !== 'path') {
-        result = result.replace(PHONE_PATTERN, phone).replace(NATIONAL_PHONE_PATTERN, phone);
-      }
+      // IBAN and phone patterns are the ones that can match digit runs inside a UUID.
+      result = withUuidsKept(result, (masked) => {
+        const ibans = masked.replace(IBAN_PATTERN, (match) => replaceIban(match, iban));
+
+        return context === 'path' ? ibans : ibans.replace(PHONE_PATTERN, phone).replace(NATIONAL_PHONE_PATTERN, phone);
+      });
     }
 
     return scrubStreets(result, replacers);
