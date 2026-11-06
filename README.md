@@ -156,7 +156,7 @@ Being upfront about what this package does **not** do is part of its job:
 2. **Free text is kept by default, but identifiers in it are scrubbed.** Unclassified free-text
    fields are not fully masked in schema-aware mode (masking them all would destroy utility),
    but a catch-all pass scrubs identifiers embedded in kept string values (custom fields,
-   computed titles, attribute types not special-cased): emails, phones, IBANs (mod-97 checked),
+   computed titles, attribute types not special-cased): emails, phones, IBANs (country code, length and mod-97 checked),
    German street addresses ("Hauptstraße 5", "Schiltacher Str. 33" — postal code and city stay),
    and PII inside URLs (components are decoded first; map links lose the place name, place ids
    and the precise position, coordinates are rounded to 2 decimals ≈ 1 km). Only the matched

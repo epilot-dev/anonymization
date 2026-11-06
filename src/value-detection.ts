@@ -6,6 +6,8 @@
  * `link_gebaeudeansicht` attribute holding a Google Maps link to the customer's house.
  */
 
+import { hasIbanCountryLength } from './iban-countries';
+
 /** Replacers for detected spans (the pseudonymizer's own, or the redactor without a secret) */
 export type ValueReplacers = {
   street: (value: string) => string;
@@ -53,9 +55,9 @@ export const scrubStreets = (value: string, replacers: ValueReplacers): string =
 
 // --- IBAN checksum -----------------------------------------------------------------------
 
-/** ISO 13616 mod-97 check of a compact IBAN */
+/** ISO 13616 check of a compact IBAN: known country code, that country's length, mod-97 checksum */
 export const isValidIban = (compact: string): boolean => {
-  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(compact)) {
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(compact) || !hasIbanCountryLength(compact)) {
     return false;
   }
 
