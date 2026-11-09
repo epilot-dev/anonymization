@@ -209,6 +209,11 @@ counts as PII".
 | Map links (Google, Apple, Bing, OpenStreetMap, short links) in unclassified fields | place → `street` pseudonym + postal code / city, place ids pseudonymized, coordinates rounded to ~1 km |
 | Everything else | emails / phones / IBANs / street addresses embedded in strings (and URL components) are scrubbed, the rest is unchanged |
 
+## MCP proxy (draft)
+
+[`mcp-proxy/`](./mcp-proxy) is an MCP gateway that runs upstream MCP tool results (first preset:
+Fullstory MCP) through this package before they reach an LLM. See its README.
+
 ## Development
 
 ```sh

@@ -26,6 +26,21 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  mcp-proxy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp-proxy
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
   publish:
     name: Publish
     runs-on: ubuntu-latest
